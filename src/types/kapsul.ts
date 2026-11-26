@@ -44,6 +44,7 @@ export interface ChatMessage {
   doubleEncrypted?: boolean;
   replyToId?: string;
   replyToPreview?: string;
+  reactions?: Record<string, string[]>; // emoji -> array of pubkeys who reacted
 }
 
 export interface ChatThread {
@@ -77,7 +78,20 @@ export interface DiscoveredUser {
   publishedAt: number;
 }
 
-export type EnvelopeKind = 'msg' | 'ttl_sync' | 'burn_chat' | 'delete_msg';
+export interface TombstoneState {
+  deletedMsgIds: Record<string, number>; // msgId -> expiresAtMs
+  burnWatermarks: Record<string, number>; // peerPubkey -> max burned sentAt ms
+  removedPeers: Record<string, number>; // peerPubkey -> removedAt ms
+}
+
+export type EnvelopeKind =
+  | 'msg'
+  | 'ttl_sync'
+  | 'burn_chat'
+  | 'delete_msg'
+  | 'typing'
+  | 'react'
+  | 'remove_peer';
 
 export interface DecryptedEnvelopePayload {
   v: 1;
@@ -92,7 +106,8 @@ export interface DecryptedEnvelopePayload {
   senderAvatar?: string;
   targetPeerPubkey?: string; // Set inside encrypted self-copy for multi-device sync
   targetPeerHandle?: string;
-  targetMsgId?: string; // Used for delete_msg
+  targetMsgId?: string; // Used for delete_msg & react
+  reaction?: string; // Used for react
   replyToId?: string;
   replyToPreview?: string;
   aesSalt?: string;

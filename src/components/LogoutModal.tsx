@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { Check, Copy, Eye, EyeOff, LogOut, X } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff, LogOut, UserX, X } from 'lucide-react';
 import type { LocalIdentity } from '../types/kapsul';
 import { exportNsec } from '../lib/crypto';
 
 interface LogoutModalProps {
   identity: LocalIdentity;
   onConfirmLogout: () => Promise<void>;
+  onRequestDeleteAccount: () => void;
   onCancel: () => void;
 }
 
 export const LogoutModal: React.FC<LogoutModalProps> = ({
   identity,
   onConfirmLogout,
+  onRequestDeleteAccount,
   onCancel,
 }) => {
   const [showKey, setShowKey] = useState(false);
@@ -50,7 +52,7 @@ export const LogoutModal: React.FC<LogoutModalProps> = ({
     >
       <div className="w-full max-w-md bg-[#0B1120] border border-blue-500/30 shadow-[0_0_32px_rgba(37,99,235,0.2)] rounded-2xl p-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="w-11 h-11 rounded-xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center text-rose-400 shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-amber-500/15 border border-amber-500/35 flex items-center justify-center text-amber-300 shrink-0">
             <LogOut className="w-5 h-5" />
           </div>
           <button
@@ -64,10 +66,10 @@ export const LogoutModal: React.FC<LogoutModalProps> = ({
         </div>
 
         <h2 id="logout-modal-title" className="mt-4 text-lg font-bold text-white">
-          Çıkış Yap
+          Cihazdan Çıkış Yap
         </h2>
         <p className="mt-2 text-sm text-slate-300 leading-relaxed">
-          Tekrar girebilmek için <span className="font-mono text-rose-300">{identity.handle}</span> gizli anahtarını mutlaka kopyala.
+          <span className="font-mono text-rose-300">{identity.handle}</span> hesabına tekrar girebilmek için gizli anahtarını kaydet.
         </p>
 
         <div className="mt-4 p-3.5 rounded-xl bg-[#070A12] border border-blue-500/25">
@@ -119,10 +121,22 @@ export const LogoutModal: React.FC<LogoutModalProps> = ({
             type="button"
             disabled={!confirmedBackup || loggingOut}
             onClick={handleLogout}
-            className="h-11 px-5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer"
+            className="h-11 px-5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             <span>{loggingOut ? 'Çıkılıyor...' : 'Çıkış Yap'}</span>
+          </button>
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-white/[0.08] flex items-center justify-between gap-2">
+          <span className="text-[11px] text-slate-400">Hesabı tamamen kapatmak mı istiyorsun?</span>
+          <button
+            type="button"
+            onClick={onRequestDeleteAccount}
+            className="text-xs font-semibold text-rose-400 hover:text-rose-300 inline-flex items-center gap-1 cursor-pointer shrink-0"
+          >
+            <UserX className="w-3.5 h-3.5" />
+            <span>Hesabı Kalıcı Sil</span>
           </button>
         </div>
       </div>

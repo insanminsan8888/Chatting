@@ -9,6 +9,7 @@ const META_PIN_CONFIG = 'pin-config';
 const META_DEVICE_KEY = 'device-wrap-key';
 
 let activeVaultKey: CryptoKey | null = null;
+let writeQueue: Promise<unknown> = Promise.resolve();
 const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder();
 
@@ -29,6 +30,12 @@ interface EncryptedRecord {
   key: string;
   ivBase64: string;
   dataBase64: string;
+}
+
+function enqueueDbOp<T>(fn: () => Promise<T>): Promise<T> {
+  const next = writeQueue.then(fn, fn);
+  writeQueue = next.catch(() => {});
+  return next;
 }
 
 function openVaultDb(): Promise<IDBDatabase> {
@@ -54,13 +61,21 @@ async function idbGet<T>(storeName: string, key: string): Promise<T | undefined>
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
     const req = store.get(key);
+    let result: T | undefined;
     req.onsuccess = () => {
-      db.close();
-      resolve(req.result as T | undefined);
+      result = req.result as T | undefined;
     };
-    req.onerror = () => {
+    tx.oncomplete = () => {
       db.close();
-      reject(req.error);
+      resolve(result);
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error('IndexedDB okuma iptal edildi'));
     };
   });
 }
@@ -70,14 +85,18 @@ async function idbPut<T>(storeName: string, value: T): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
-    const req = store.put(value);
-    req.onsuccess = () => {
+    store.put(value);
+    tx.oncomplete = () => {
       db.close();
       resolve();
     };
-    req.onerror = () => {
+    tx.onerror = () => {
       db.close();
-      reject(req.error);
+      reject(tx.error);
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error('IndexedDB yazma iptal edildi'));
     };
   });
 }
@@ -87,14 +106,18 @@ async function idbDelete(storeName: string, key: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite');
     const store = tx.objectStore(storeName);
-    const req = store.delete(key);
-    req.onsuccess = () => {
+    store.delete(key);
+    tx.oncomplete = () => {
       db.close();
       resolve();
     };
-    req.onerror = () => {
+    tx.onerror = () => {
       db.close();
-      reject(req.error);
+      reject(tx.error);
+    };
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error ?? new Error('IndexedDB silme iptal edildi'));
     };
   });
 }
@@ -168,27 +191,29 @@ export async function initVaultStatus(): Promise<{ status: VaultStateStatus; has
 }
 
 export async function initializeNewVault(pin?: string): Promise<void> {
-  const cleanPin = pin?.trim();
-  if (cleanPin && cleanPin.length >= 4) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const verifierBase64 = await hashPinVerifier(cleanPin, salt);
-    await idbPut<PinConfigRecord>(STORE_META, {
-      id: META_PIN_CONFIG,
-      saltBase64: bytesToBase64(salt),
-      verifierBase64,
-    });
-    await idbDelete(STORE_META, META_DEVICE_KEY);
-    activeVaultKey = await derivePinKey(cleanPin, salt);
-  } else {
-    const key = await crypto.subtle.generateKey(
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-    await idbPut<DeviceKeyRecord>(STORE_META, { id: META_DEVICE_KEY, key });
-    await idbDelete(STORE_META, META_PIN_CONFIG);
-    activeVaultKey = key;
-  }
+  return enqueueDbOp(async () => {
+    const cleanPin = pin?.trim();
+    if (cleanPin && cleanPin.length >= 4) {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const verifierBase64 = await hashPinVerifier(cleanPin, salt);
+      await idbPut<PinConfigRecord>(STORE_META, {
+        id: META_PIN_CONFIG,
+        saltBase64: bytesToBase64(salt),
+        verifierBase64,
+      });
+      await idbDelete(STORE_META, META_DEVICE_KEY);
+      activeVaultKey = await derivePinKey(cleanPin, salt);
+    } else {
+      const key = await crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+      await idbPut<DeviceKeyRecord>(STORE_META, { id: META_DEVICE_KEY, key });
+      await idbDelete(STORE_META, META_PIN_CONFIG);
+      activeVaultKey = key;
+    }
+  });
 }
 
 export async function unlockVaultWithPin(pin: string): Promise<boolean> {
@@ -208,24 +233,27 @@ export function lockVaultMemory(): void {
 }
 
 export async function saveEncryptedItem<T>(key: string, value: T): Promise<void> {
-  if (!activeVaultKey) {
-    throw new Error('Kasa kilitli, veri yazılamadı.');
-  }
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = utf8Encoder.encode(JSON.stringify(value));
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    activeVaultKey,
-    plaintext
-  );
-  await idbPut<EncryptedRecord>(STORE_RECORDS, {
-    key,
-    ivBase64: bytesToBase64(iv),
-    dataBase64: bytesToBase64(new Uint8Array(encrypted)),
+  return enqueueDbOp(async () => {
+    if (!activeVaultKey) {
+      throw new Error('Kasa kilitli, veri yazılamadı.');
+    }
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const plaintext = utf8Encoder.encode(JSON.stringify(value));
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      activeVaultKey,
+      plaintext
+    );
+    await idbPut<EncryptedRecord>(STORE_RECORDS, {
+      key,
+      ivBase64: bytesToBase64(iv),
+      dataBase64: bytesToBase64(new Uint8Array(encrypted)),
+    });
   });
 }
 
 export async function loadEncryptedItem<T>(key: string): Promise<T | null> {
+  await writeQueue;
   if (!activeVaultKey) return null;
   const record = await idbGet<EncryptedRecord>(STORE_RECORDS, key);
   if (!record) return null;
@@ -253,11 +281,13 @@ export async function rekeyVaultWithPin(newPin: string | null, snapshot: Record<
 }
 
 export async function wipeEntireVault(): Promise<void> {
-  activeVaultKey = null;
-  return new Promise((resolve) => {
-    const req = indexedDB.deleteDatabase(DB_NAME);
-    req.onsuccess = () => resolve();
-    req.onerror = () => resolve();
-    req.onblocked = () => resolve();
+  return enqueueDbOp(async () => {
+    activeVaultKey = null;
+    return new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
   });
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Kapsül — Sunucusuz Şifreli Mesajlaşma",
-  "description": "Kayıtsız, veritabanısız, uçtan uca şifreli ve otomatik silinen anonim mesajlaşma uygulaması.",
+  "name": "Gölge — Sunucusuz Gizli Mesajlaşma",
+  "description": "Kayıtsız, veritabanısız, IP gizli, uçtan uca şifreli ve otomatik silinen anonim mesajlaşma.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

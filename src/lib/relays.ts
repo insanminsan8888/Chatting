@@ -11,8 +11,8 @@ export const DEFAULT_RELAYS: string[] = [
   'wss://offchain.pub',
 ];
 
-const APP_TAG = 'kapsul-e2ee';
-const WIRE_CHANNEL_NAME = 'kapsul-wire-v1';
+const APP_TAGS = ['golge-e2ee', 'kapsul-e2ee'];
+const WIRE_CHANNEL_NAME = 'golge-wire-v1';
 
 export class RelayNetwork {
   private pool: SimplePool;
@@ -76,6 +76,7 @@ export class RelayNetwork {
       name: identity.username,
       display_name: identity.handle,
       kapsul: 1,
+      golge: 1,
     };
     if (isSafeAvatarDataUrl(identity.avatarDataUrl)) {
       contentPayload.picture = identity.avatarDataUrl;
@@ -86,7 +87,8 @@ export class RelayNetwork {
         kind: 0,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
-          ['t', APP_TAG],
+          ['t', 'golge-e2ee'],
+          ['t', 'kapsul-e2ee'],
           ['name', identity.username.toLowerCase()],
         ],
         content: JSON.stringify(contentPayload),
@@ -102,11 +104,76 @@ export class RelayNetwork {
     return accepted;
   }
 
+  /**
+   * Permanently deletes the public Kind-0 profile from Nostr relays:
+   * 1) Overwrites the replaceable Kind-0 event with an empty tombstone (no name/avatar/tags)
+   * 2) Sends NIP-09 deletion (Kind-5) referencing previous Kind-0 event IDs
+   */
+  public async publishAccountDeletion(identity: LocalIdentity): Promise<void> {
+    const sk = hexToBytes(identity.secretKeyHex);
+    const oldProfileIds: string[] = [];
+
+    try {
+      const existingEvents = await Promise.race([
+        this.pool.querySync(this.relays, {
+          kinds: [0],
+          authors: [identity.pubkey],
+        }),
+        new Promise<Event[]>((resolve) => setTimeout(() => resolve([]), 2500)),
+      ]);
+      for (const ev of existingEvents) {
+        if (ev?.id) oldProfileIds.push(ev.id);
+      }
+    } catch {
+      // Proceed even if query fails
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+
+    // Replace Kind-0 with blank deleted record (no golge-e2ee/kapsul-e2ee tags so it drops from directory)
+    const blankProfileEvt = finalizeEvent(
+      {
+        kind: 0,
+        created_at: nowSec,
+        tags: [],
+        content: JSON.stringify({
+          name: '',
+          display_name: '',
+          picture: '',
+          deleted: true,
+        }),
+      },
+      sk
+    );
+
+    // NIP-09 deletion request for prior Kind-0 events
+    const deleteTags: string[][] = [['k', '0']];
+    for (const id of [...new Set(oldProfileIds)]) {
+      deleteTags.push(['e', id]);
+    }
+    const nip09Evt = finalizeEvent(
+      {
+        kind: 5,
+        created_at: nowSec,
+        tags: deleteTags,
+        content: 'Hesap silindi',
+      },
+      sk
+    );
+
+    await Promise.race([
+      Promise.allSettled([
+        ...this.pool.publish(this.relays, blankProfileEvt),
+        ...this.pool.publish(this.relays, nip09Evt),
+      ]),
+      new Promise<void>((resolve) => setTimeout(resolve, 3000)),
+    ]);
+  }
+
   public async searchUsersByUsername(query: string): Promise<DiscoveredUser[]> {
     const clean = query.trim().toLowerCase();
     if (!clean) return [];
 
-    // Also search locally announced users on BroadcastChannel cache if present
     const found = new Map<string, DiscoveredUser>();
 
     const events = await new Promise<Event[]>((resolve) => {
@@ -124,8 +191,8 @@ export class RelayNetwork {
           this.relays,
           {
             kinds: [0],
-            '#t': [APP_TAG],
-            limit: 120,
+            '#t': APP_TAGS,
+            limit: 150,
           },
           {
             onevent(ev) {
@@ -150,11 +217,12 @@ export class RelayNetwork {
           name?: unknown;
           display_name?: unknown;
           picture?: unknown;
-          kapsul?: unknown;
+          deleted?: unknown;
         };
+        if (data.deleted === true) continue;
         if (typeof data.name !== 'string') continue;
         const username = sanitizeUsername(data.name);
-        if (!username) continue;
+        if (username.length < 2) continue;
         const handle = formatHandle(username, ev.pubkey);
         const matches =
           username.toLowerCase().includes(clean) ||
@@ -190,9 +258,11 @@ export class RelayNetwork {
       const data = JSON.parse(ev.content) as {
         name?: unknown;
         picture?: unknown;
+        deleted?: unknown;
       };
+      if (data.deleted === true) return null;
       const username = typeof data.name === 'string' ? sanitizeUsername(data.name) : '';
-      if (!username) return null;
+      if (username.length < 2) return null;
       return {
         pubkey: ev.pubkey,
         username,
@@ -206,10 +276,7 @@ export class RelayNetwork {
     }
   }
 
-  public subscribeGiftWraps(
-    myPubkey: string,
-    onGiftWrap: (ev: Event) => void
-  ): void {
+  public subscribeGiftWraps(myPubkey: string, onGiftWrap: (ev: Event) => void): void {
     this.activeSub?.close();
     this.wireChannel?.close();
 
@@ -218,6 +285,9 @@ export class RelayNetwork {
 
     const handleIncoming = (ev: Event) => {
       if (this.seenWrapIds.has(ev.id)) return;
+      if (this.seenWrapIds.size > 6000) {
+        this.seenWrapIds.clear();
+      }
       this.seenWrapIds.add(ev.id);
       onGiftWrap(ev);
     };
@@ -243,7 +313,8 @@ export class RelayNetwork {
       this.wireChannel.onmessage = (msg: MessageEvent<unknown>) => {
         const ev = msg.data as Event | undefined;
         if (ev && typeof ev === 'object' && ev.kind === 1059 && typeof ev.id === 'string') {
-          const isForMe = Array.isArray(ev.tags) && ev.tags.some((t) => t[0] === 'p' && t[1] === myPubkey);
+          const isForMe =
+            Array.isArray(ev.tags) && ev.tags.some((t) => t[0] === 'p' && t[1] === myPubkey);
           if (isForMe) {
             handleIncoming(ev);
           }

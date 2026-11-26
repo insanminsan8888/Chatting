@@ -14,8 +14,9 @@ import {
   Search,
   Send,
   Share2,
-  Shield,
   ShieldCheck,
+  Smile,
+  SmilePlus,
   Trash2,
   UserPlus,
   X,
@@ -33,6 +34,16 @@ import {
   type TTLHours,
 } from '../types/kapsul';
 import { isSafeAvatarDataUrl, parsePeerInput } from '../lib/crypto';
+import { BrandLogo } from './BrandLogo';
+import { ConnectionVisual } from './ConnectionVisual';
+
+const COMPOSER_EMOJIS = [
+  '😀', '😂', '😍', '🥰', '😎', '🤔', '😮', '😢', '😡',
+  '🔥', '❤️', '💯', '👍', '👎', '👏', '🙏', '🎉', '👀',
+  '💀', '🔒', '⚡', '✨',
+];
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '😮', '😢'];
 
 interface ChatWorkspaceProps {
   identity: LocalIdentity;
@@ -42,6 +53,7 @@ interface ChatWorkspaceProps {
   activePeerPubkey: string | null;
   settings: PrivacySettings;
   relayHealth: RelayHealth[];
+  typingPeers: Record<string, number>;
   privacyBlurred: boolean;
   nowMs: number;
   onTogglePrivacyBlur: () => void;
@@ -62,6 +74,8 @@ interface ChatWorkspaceProps {
       burnAfterSec?: number;
     }
   ) => Promise<void>;
+  onTyping: (peerPubkey: string) => void;
+  onReactMessage: (msg: ChatMessage, emoji: string) => Promise<void>;
   onDeleteMessage: (msg: ChatMessage, scope: 'local' | 'both') => Promise<void>;
   onChangeChatTTL: (peerPubkey: string, ttl: TTLHours) => Promise<void>;
   onOpenInvite: () => void;
@@ -70,6 +84,7 @@ interface ChatWorkspaceProps {
   onLockVault: () => void;
   onRequestLogout: () => void;
   onRequestBurnChat: (peer: PeerContact) => void;
+  onRequestRemovePeer: (peer: PeerContact) => void;
   onRequestPanicWipe: () => void;
 }
 
@@ -121,6 +136,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   activePeerPubkey,
   settings,
   relayHealth,
+  typingPeers,
   privacyBlurred,
   nowMs,
   onTogglePrivacyBlur,
@@ -128,6 +144,8 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   onSearchUsers,
   onAddPeer,
   onSendMessage,
+  onTyping,
+  onReactMessage,
   onDeleteMessage,
   onChangeChatTTL,
   onOpenInvite,
@@ -136,6 +154,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   onLockVault,
   onRequestLogout,
   onRequestBurnChat,
+  onRequestRemovePeer,
   onRequestPanicWipe,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -145,17 +164,20 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [quickBurn15s, setQuickBurn15s] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [reactMenuMsgId, setReactMenuMsgId] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<{ id: string; preview: string } | null>(null);
   const [deleteMenuMsgId, setDeleteMenuMsgId] = useState<string | null>(null);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const lastTypingEmitRef = useRef<number>(0);
 
-  const connectedRelayCount = relayHealth.filter((r) => r.status === 'connected').length;
   const activePeer = activePeerPubkey ? contacts[activePeerPubkey] : undefined;
   const activeThread = activePeerPubkey ? threads[activePeerPubkey] : undefined;
   const activeTTL: TTLHours = activeThread?.ttlHours ?? 24;
+  const isPeerTyping = Boolean(activePeerPubkey && (typingPeers[activePeerPubkey] ?? 0) > nowMs);
 
   const activeMessages = activePeerPubkey
     ? messages
@@ -171,13 +193,15 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   useEffect(() => {
     setReplyTarget(null);
     setDeleteMenuMsgId(null);
+    setReactMenuMsgId(null);
+    setEmojiPickerOpen(false);
     setChatSearchOpen(false);
     setChatSearchQuery('');
   }, [activePeerPubkey]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeMessages.length, activePeerPubkey]);
+  }, [activeMessages.length, activePeerPubkey, isPeerTyping]);
 
   const parsedDirectPeer = parsePeerInput(searchQuery);
 
@@ -205,6 +229,17 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
     }
   };
 
+  const handleDraftChange = (val: string) => {
+    setDraft(val);
+    if (activePeer && val.trim().length > 0) {
+      const now = Date.now();
+      if (now - lastTypingEmitRef.current > 2400) {
+        lastTypingEmitRef.current = now;
+        onTyping(activePeer.pubkey);
+      }
+    }
+  };
+
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!activePeer || sending) return;
@@ -214,6 +249,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
     const burnAfterSec = quickBurn15s ? 15 : undefined;
     setDraft('');
     setReplyTarget(null);
+    setEmojiPickerOpen(false);
     setSending(true);
     try {
       await onSendMessage(activePeer.pubkey, text, {
@@ -259,15 +295,18 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
               type="button"
               onClick={onOpenNetwork}
               title="Profil ve ayarlar"
-              className="cursor-pointer rounded-xl min-h-[40px] min-w-[40px] flex items-center justify-center"
+              className="cursor-pointer rounded-xl min-h-[40px] min-w-[40px] flex items-center justify-center relative"
             >
-              <AvatarCircle name={identity.username} avatarDataUrl={identity.avatarDataUrl} />
+              {identity.avatarDataUrl ? (
+                <AvatarCircle name={identity.username} avatarDataUrl={identity.avatarDataUrl} />
+              ) : (
+                <BrandLogo size="sm" />
+              )}
             </button>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                 <span className="font-bold text-sm tracking-tight text-white font-['Plus_Jakarta_Sans'] truncate">
-                  Kapsül
+                  Gölge
                 </span>
               </div>
               <p className="mt-0.5 font-mono text-xs text-blue-300 truncate">{identity.handle}</p>
@@ -414,23 +453,26 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                 const peer = contacts[thread.peerPubkey];
                 if (!peer) return null;
                 const isSelected = thread.peerPubkey === activePeerPubkey;
+                const isTypingNow = (typingPeers[thread.peerPubkey] ?? 0) > nowMs;
                 const threadMsgs = messages
                   .filter((m) => m.peerPubkey === thread.peerPubkey && m.expiresAt > nowMs)
                   .sort((a, b) => b.createdAt - a.createdAt);
                 const lastMsg = threadMsgs[0];
 
                 return (
-                  <button
+                  <div
                     key={thread.peerPubkey}
-                    type="button"
-                    onClick={() => onSelectPeer(thread.peerPubkey)}
-                    className={`w-full px-4 py-3.5 text-left transition-colors flex items-center justify-between gap-3 cursor-pointer min-h-[64px] ${
+                    className={`group px-3.5 py-3 transition-colors flex items-center justify-between gap-2 min-h-[64px] ${
                       isSelected
                         ? 'bg-gradient-to-r from-blue-600/15 to-rose-600/10'
                         : 'hover:bg-[#10182C]'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => onSelectPeer(thread.peerPubkey)}
+                      className="flex items-center gap-3 min-w-0 flex-1 text-left cursor-pointer"
+                    >
                       <AvatarCircle
                         name={peer.username}
                         avatarDataUrl={peer.avatarDataUrl}
@@ -438,52 +480,67 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                       />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-semibold text-white truncate">{peer.handle}</span>
+                          <span className="text-sm font-semibold text-white truncate">
+                            {peer.handle}
+                          </span>
                           {peer.verifiedFingerprint && (
                             <ShieldCheck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                           )}
                         </div>
-                        <p className="mt-0.5 text-xs text-slate-400 truncate">
+                        <p
+                          className={`mt-0.5 text-xs truncate ${
+                            isTypingNow ? 'text-rose-400 font-medium' : 'text-slate-400'
+                          }`}
+                        >
                           {privacyBlurred
                             ? '••••••'
+                            : isTypingNow
+                            ? 'yazıyor...'
                             : lastMsg
                             ? lastMsg.text
                             : 'Yeni sohbet'}
                         </p>
                       </div>
+                    </button>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="text-right">
+                        <span className="font-mono text-[11px] text-slate-400 tabular-nums">
+                          {thread.ttlHours}s
+                        </span>
+                        {thread.unreadCount > 0 && (
+                          <p className="mt-0.5 font-mono text-[11px] font-semibold text-rose-400 tabular-nums">
+                            +{thread.unreadCount}
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => onRequestRemovePeer(peer)}
+                        title="Kişiyi ve sohbeti sil"
+                        aria-label={`${peer.handle} kişisini ve sohbeti sil`}
+                        className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 opacity-85 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100 transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <span className="font-mono text-[11px] text-slate-400 tabular-nums">
-                        {thread.ttlHours}s
-                      </span>
-                      {thread.unreadCount > 0 && (
-                        <p className="mt-1 font-mono text-[11px] font-semibold text-rose-400 tabular-nums">
-                          +{thread.unreadCount}
-                        </p>
-                      )}
-                    </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* Bottom Network & Privacy Toolbar */}
-        <div className="px-4 py-2.5 border-t border-blue-500/20 flex items-center justify-between gap-2 bg-[#080C17]">
+        {/* Bottom Network Visual & Privacy Toolbar */}
+        <div className="px-3.5 py-2.5 border-t border-blue-500/20 flex items-center justify-between gap-2 bg-[#080C17]">
           <button
             type="button"
             onClick={onOpenNetwork}
-            className="h-10 px-2.5 rounded-lg hover:bg-white/[0.05] text-xs text-slate-300 flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+            className="h-10 px-2.5 rounded-lg hover:bg-white/[0.05] flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <Radio
-              className={`w-3.5 h-3.5 ${
-                connectedRelayCount > 0 ? 'text-blue-400' : 'text-rose-400'
-              }`}
-            />
-            <span className="tabular-nums">
-              {connectedRelayCount}/{settings.relays.length} röle · Ayarlar
-            </span>
+            <ConnectionVisual relayHealth={relayHealth} variant="compact" />
+            <span className="text-[11px] text-slate-500 hidden sm:inline">· Ayarlar</span>
           </button>
 
           <button
@@ -491,7 +548,11 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
             onClick={onTogglePrivacyBlur}
             className="h-10 px-2.5 rounded-lg hover:bg-white/[0.05] text-xs text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
           >
-            {privacyBlurred ? <Eye className="w-3.5 h-3.5 text-rose-400" /> : <EyeOff className="w-3.5 h-3.5 text-slate-400" />}
+            {privacyBlurred ? (
+              <Eye className="w-3.5 h-3.5 text-rose-400" />
+            ) : (
+              <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+            )}
             <span>{privacyBlurred ? 'Göster' : 'Gizle'}</span>
           </button>
         </div>
@@ -505,13 +566,14 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
       >
         {!activePeer ? (
           <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-8 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-[#0B1120] border border-blue-500/35 shadow-[0_0_24px_rgba(37,99,235,0.22)] flex items-center justify-center text-rose-400 mb-5">
-              <Shield className="w-7 h-7" />
-            </div>
-            <h2 className="text-xl font-bold text-white">Kapsül</h2>
+            <BrandLogo size="lg" className="mb-5" />
+            <h2 className="text-xl font-bold text-white">Gölge</h2>
             <p className="mt-2 text-sm text-slate-400 max-w-sm">
               Soldan kullanıcı adı ara veya davet linkini paylaş. Mesajlar varsayılan olarak 24 saatte silinir.
             </p>
+            <div className="mt-4">
+              <ConnectionVisual relayHealth={relayHealth} variant="compact" />
+            </div>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
@@ -551,18 +613,36 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                 />
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <h2 className="text-sm sm:text-base font-bold text-white truncate">{activePeer.handle}</h2>
+                    <h2 className="text-sm sm:text-base font-bold text-white truncate">
+                      {activePeer.handle}
+                    </h2>
                     {activePeer.verifiedFingerprint && (
                       <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-400 truncate">
-                    Şifreli · IP gizli{activePeer.sharedSecret ? ' · Çift kilit' : ''}
+                  <p className="text-[11px] truncate">
+                    {isPeerTyping ? (
+                      <span className="text-rose-400 font-semibold">yazıyor...</span>
+                    ) : (
+                      <span className="text-slate-400">
+                        Şifreli · IP gizli{activePeer.sharedSecret ? ' · Çift kilit' : ''}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                {/* Connection status pill on mobile chat header */}
+                <button
+                  type="button"
+                  onClick={onOpenNetwork}
+                  title="Bağlantı durumu"
+                  className="lg:hidden h-10 px-2.5 rounded-xl bg-[#07080C] border border-blue-500/25 flex items-center cursor-pointer"
+                >
+                  <ConnectionVisual relayHealth={relayHealth} variant="compact" />
+                </button>
+
                 {/* TTL Segmented Selector */}
                 <div
                   className="flex items-center gap-0.5 p-1 rounded-xl bg-[#07080C] border border-blue-500/25"
@@ -617,11 +697,21 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                 <button
                   type="button"
                   onClick={() => onRequestBurnChat(activePeer)}
-                  title="Sohbeti sil"
-                  aria-label="Sohbeti sil"
-                  className="w-10 h-10 rounded-xl bg-[#07080C] hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center transition-colors cursor-pointer"
+                  title="Mesajları yak"
+                  aria-label="Mesajları yak"
+                  className="w-10 h-10 rounded-xl bg-[#07080C] hover:bg-amber-500/15 border border-blue-500/25 text-amber-400 flex items-center justify-center transition-colors cursor-pointer"
                 >
                   <Flame className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onRequestRemovePeer(activePeer)}
+                  title="Kişiyi ve sohbeti sil"
+                  aria-label="Kişiyi ve sohbeti sil"
+                  className="w-10 h-10 rounded-xl bg-[#07080C] hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             </header>
@@ -680,6 +770,10 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
 
                   const isMine = msg.direction === 'outgoing';
                   const isDeleteMenuOpen = deleteMenuMsgId === msg.id;
+                  const isReactMenuOpen = reactMenuMsgId === msg.id;
+                  const reactionEntries = Object.entries(msg.reactions ?? {}).filter(
+                    ([, reactors]) => reactors.length > 0
+                  );
 
                   return (
                     <div
@@ -687,7 +781,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                       className={`group flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
                     >
                       <div
-                        className={`flex items-end gap-1.5 max-w-[92%] sm:max-w-[75%] ${
+                        className={`flex items-end gap-1.5 max-w-[94%] sm:max-w-[75%] ${
                           isMine ? 'flex-row-reverse' : 'flex-row'
                         }`}
                       >
@@ -708,8 +802,20 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                           {msg.text}
                         </div>
 
-                        {/* Actions: Copy, Reply, Delete */}
-                        <div className="flex items-center gap-0.5 opacity-85 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+                        {/* Actions: Emoji React, Copy, Reply, Delete */}
+                        <div className="flex items-center gap-0.5 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteMenuMsgId(null);
+                              setReactMenuMsgId((prev) => (prev === msg.id ? null : msg.id));
+                            }}
+                            title="Emoji tepkisi"
+                            aria-label="Emoji tepkisi"
+                            className="w-8 h-8 rounded-lg hover:bg-white/[0.06] text-slate-400 hover:text-amber-300 flex items-center justify-center cursor-pointer"
+                          >
+                            <SmilePlus className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleCopyMessage(msg)}
@@ -736,9 +842,10 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
-                              setDeleteMenuMsgId((prev) => (prev === msg.id ? null : msg.id))
-                            }
+                            onClick={() => {
+                              setReactMenuMsgId(null);
+                              setDeleteMenuMsgId((prev) => (prev === msg.id ? null : msg.id));
+                            }}
                             title="Sil"
                             aria-label="Sil"
                             className="w-8 h-8 rounded-lg hover:bg-rose-500/15 text-slate-400 hover:text-rose-400 flex items-center justify-center cursor-pointer"
@@ -747,6 +854,49 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                           </button>
                         </div>
                       </div>
+
+                      {isReactMenuOpen && (
+                        <div className="mt-1.5 flex items-center gap-1 p-1 rounded-xl bg-[#0B1120] border border-blue-500/30 shadow-lg">
+                          {QUICK_REACTIONS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => {
+                                setReactMenuMsgId(null);
+                                onReactMessage(msg, emoji);
+                              }}
+                              className="w-8 h-8 rounded-lg hover:bg-white/[0.08] text-base flex items-center justify-center cursor-pointer transition-transform hover:scale-110"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {reactionEntries.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {reactionEntries.map(([emoji, reactors]) => {
+                            const iReacted = reactors.includes(identity.pubkey);
+                            return (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => onReactMessage(msg, emoji)}
+                                className={`h-6 px-2 rounded-lg text-xs inline-flex items-center gap-1 border transition-colors cursor-pointer ${
+                                  iReacted
+                                    ? 'bg-blue-600/25 border-blue-500/50 text-white'
+                                    : 'bg-[#0B1120] border-white/10 text-slate-300 hover:border-blue-500/35'
+                                }`}
+                              >
+                                <span>{emoji}</span>
+                                <span className="font-mono text-[10px] tabular-nums">
+                                  {reactors.length}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
 
                       {isDeleteMenuOpen && (
                         <div className="mt-1.5 flex items-center gap-1.5 p-1 rounded-xl bg-[#0B1120] border border-blue-500/30">
@@ -784,7 +934,11 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                       <div className="mt-1 px-1 flex items-center gap-2 text-[11px] text-slate-500 tabular-nums">
                         <span>{formatClock(msg.createdAt)}</span>
                         <span aria-hidden="true">·</span>
-                        <span className={`font-mono ${msg.burnAfterSec ? 'text-rose-400 font-semibold' : 'text-slate-400'}`}>
+                        <span
+                          className={`font-mono ${
+                            msg.burnAfterSec ? 'text-rose-400 font-semibold' : 'text-slate-400'
+                          }`}
+                        >
                           {formatRemaining(msg.expiresAt, nowMs)}
                         </span>
                         {isMine && (
@@ -804,6 +958,23 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                   );
                 })
               )}
+
+              {/* Live Typing Bubble */}
+              {isPeerTyping && (
+                <div className="flex items-start">
+                  <div className="px-3.5 py-2 rounded-2xl bg-[#0B1120] border border-blue-500/25 inline-flex items-center gap-2">
+                    <span className="text-xs text-blue-300 font-medium">
+                      {activePeer.username} yazıyor
+                    </span>
+                    <span className="inline-flex items-center gap-1" aria-hidden="true">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-bounce [animation-delay:0ms]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:150ms]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-bounce [animation-delay:300ms]" />
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
 
               {/* Manual/Optional Privacy Shield */}
@@ -827,8 +998,23 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
             {/* Message Composer */}
             <form
               onSubmit={handleSend}
-              className="p-3 sm:p-4 border-t border-blue-500/20 bg-[#0B1120]/95 backdrop-blur-md"
+              className="p-3 sm:p-4 border-t border-blue-500/20 bg-[#0B1120]/95 backdrop-blur-md relative"
             >
+              {emojiPickerOpen && (
+                <div className="mb-2.5 p-2.5 rounded-xl bg-[#070A12] border border-blue-500/30 flex flex-wrap gap-1.5 shadow-xl">
+                  {COMPOSER_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => handleDraftChange(`${draft}${emoji}`)}
+                      className="w-9 h-9 rounded-lg hover:bg-white/[0.08] text-lg flex items-center justify-center cursor-pointer transition-transform hover:scale-110"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {replyTarget && (
                 <div className="mb-2.5 px-3 py-2 rounded-xl bg-[#07080C] border border-blue-500/25 flex items-center justify-between gap-3">
                   <div className="min-w-0 text-xs text-slate-300 truncate">
@@ -844,13 +1030,13 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                   </button>
                 </div>
               )}
-              <div className="flex items-end gap-2">
+              <div className="flex items-end gap-1.5 sm:gap-2">
                 <button
                   type="button"
                   onClick={() => setQuickBurn15s((prev) => !prev)}
                   title="15 saniyede otomatik yok olan mesaj"
                   aria-label="15 saniyelik hızlı yakma modu"
-                  className={`h-11 px-3 rounded-xl border text-xs font-mono font-semibold inline-flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
+                  className={`h-11 px-2.5 sm:px-3 rounded-xl border text-xs font-mono font-semibold inline-flex items-center gap-1 transition-all shrink-0 cursor-pointer ${
                     quickBurn15s
                       ? 'bg-rose-600/25 border-rose-500 text-rose-200 shadow-[0_0_14px_rgba(225,29,72,0.3)]'
                       : 'bg-[#07080C] border-blue-500/25 text-slate-400 hover:text-white'
@@ -860,14 +1046,28 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                   <span>15sn</span>
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => setEmojiPickerOpen((prev) => !prev)}
+                  title="Emoji ekle"
+                  aria-label="Emoji ekle"
+                  className={`w-11 h-11 rounded-xl border flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+                    emojiPickerOpen
+                      ? 'bg-blue-600/25 border-blue-500 text-blue-200'
+                      : 'bg-[#07080C] border-blue-500/25 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Smile className="w-4 h-4" />
+                </button>
+
                 <textarea
                   rows={1}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => handleDraftChange(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={
                     quickBurn15s
-                      ? '15 saniyede silinecek gizli mesaj yaz...'
+                      ? '15sn sonra silinecek mesaj yaz...'
                       : `${activePeer.username} kullanıcısına yaz...`
                   }
                   className="flex-1 min-h-[44px] max-h-32 px-3.5 py-2.5 rounded-xl bg-[#07080C] border border-blue-500/25 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-rose-500 resize-none"

@@ -75,7 +75,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
         <div className="mt-5 flex flex-col items-center">
           <div className="p-3 rounded-2xl bg-[#0B1120] border border-blue-500/25 shadow-[0_0_20px_rgba(37,99,235,0.16)]">
             {qrDataUrl ? (
-              <img src={qrDataUrl} alt="Kapsül davet QR kodu" className="w-44 h-44 rounded-lg" />
+              <img src={qrDataUrl} alt="Gölge davet QR kodu" className="w-44 h-44 rounded-lg" />
             ) : (
               <div className="w-44 h-44 flex items-center justify-center text-xs text-slate-500">
                 QR hazırlanıyor...
@@ -114,7 +114,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
               className="h-10 px-3 rounded-xl bg-[#070A12] hover:bg-[#111A2E] border border-blue-500/25 text-xs font-medium text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               {copiedType === 'token' ? <Check className="w-3.5 h-3.5 text-blue-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-              <span>{copiedType === 'token' ? 'Kopyalandı' : 'Kapsül Kodu'}</span>
+              <span>{copiedType === 'token' ? 'Kopyalandı' : 'Davet Kodu'}</span>
             </button>
           </div>
         </div>

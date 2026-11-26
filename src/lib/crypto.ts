@@ -2,7 +2,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent, type Event
 import * as nip19 from 'nostr-tools/nip19';
 import * as nip44 from 'nostr-tools/nip44';
 import { GiftWrap, PrivateDirectMessage, Seal } from 'nostr-tools/kinds';
-import type { DecryptedEnvelopePayload, LocalIdentity, TTLHours } from '../types/kapsul';
+import type { DecryptedEnvelopePayload, EnvelopeKind, LocalIdentity, TTLHours } from '../types/kapsul';
 
 const TWO_DAYS_SEC = 2 * 24 * 60 * 60;
 const utf8Encoder = new TextEncoder();
@@ -79,13 +79,13 @@ export function restoreIdentityFromNsec(rawUsername: string, nsecOrHex: string):
   if (trimmed.startsWith('nsec1')) {
     const decoded = nip19.decode(trimmed);
     if (decoded.type !== 'nsec') {
-      throw new Error('Geçersiz nsec anahtarı.');
+      throw new Error('Geçersiz gizli anahtar.');
     }
     sk = decoded.data;
   } else if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
     sk = hexToBytes(trimmed);
   } else {
-    throw new Error('Geçerli bir nsec1 veya 64 karakterlik gizli anahtar girin.');
+    throw new Error('Geçerli bir nsec1 gizli anahtarı girin.');
   }
 
   const pubkey = getPublicKey(sk);
@@ -112,35 +112,43 @@ export function createInviteToken(identity: LocalIdentity): string {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
-  return `kapsul:${encoded}`;
+  return `golge:${encoded}`;
 }
 
 export function createInviteUrl(identity: LocalIdentity): string {
   const token = createInviteToken(identity);
   const base = `${window.location.origin}${window.location.pathname}`;
-  return `${base}#kapsul=${encodeURIComponent(token.replace(/^kapsul:/, ''))}`;
+  return `${base}#golge=${encodeURIComponent(token.replace(/^golge:/, ''))}`;
 }
 
-export function parsePeerInput(rawInput: string): { pubkey: string; username?: string; handle?: string; npub: string } | null {
+export function parsePeerInput(
+  rawInput: string
+): { pubkey: string; username?: string; handle?: string; npub: string } | null {
   const trimmed = rawInput.trim();
   if (!trimmed) return null;
 
-  // Handle full URL with #kapsul=...
-  const hashIdx = trimmed.indexOf('#kapsul=');
-  let token = trimmed;
-  if (hashIdx !== -1) {
-    token = `kapsul:${decodeURIComponent(trimmed.slice(hashIdx + 8).split('&')[0])}`;
-  }
+  try {
+    let token = trimmed;
+    const golgeIdx = trimmed.indexOf('#golge=');
+    const kapsulIdx = trimmed.indexOf('#kapsul=');
+    if (golgeIdx !== -1) {
+      token = `golge:${decodeURIComponent(trimmed.slice(golgeIdx + 7).split('&')[0])}`;
+    } else if (kapsulIdx !== -1) {
+      token = `kapsul:${decodeURIComponent(trimmed.slice(kapsulIdx + 8).split('&')[0])}`;
+    }
 
-  if (token.startsWith('kapsul:')) {
-    try {
-      const b64url = token.slice(7);
+    if (token.startsWith('golge:') || token.startsWith('kapsul:')) {
+      const b64url = token.startsWith('golge:') ? token.slice(6) : token.slice(7);
       const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
       const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-      const parsed = JSON.parse(utf8Decoder.decode(base64ToBytes(padded))) as { u?: unknown; p?: unknown };
+      const parsed = JSON.parse(utf8Decoder.decode(base64ToBytes(padded))) as {
+        u?: unknown;
+        p?: unknown;
+      };
       if (typeof parsed.p === 'string' && /^[0-9a-f]{64}$/i.test(parsed.p)) {
         const pubkey = parsed.p.toLowerCase();
-        const username = typeof parsed.u === 'string' ? sanitizeUsername(parsed.u) || 'anonim' : 'anonim';
+        const username =
+          typeof parsed.u === 'string' ? sanitizeUsername(parsed.u) || 'anonim' : 'anonim';
         return {
           pubkey,
           username,
@@ -148,13 +156,10 @@ export function parsePeerInput(rawInput: string): { pubkey: string; username?: s
           npub: nip19.npubEncode(pubkey),
         };
       }
-    } catch {
       return null;
     }
-  }
 
-  if (trimmed.startsWith('npub1')) {
-    try {
+    if (trimmed.startsWith('npub1')) {
       const decoded = nip19.decode(trimmed);
       if (decoded.type === 'npub') {
         const pubkey = decoded.data.toLowerCase();
@@ -163,17 +168,18 @@ export function parsePeerInput(rawInput: string): { pubkey: string; username?: s
           npub: nip19.npubEncode(pubkey),
         };
       }
-    } catch {
       return null;
     }
-  }
 
-  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-    const pubkey = trimmed.toLowerCase();
-    return {
-      pubkey,
-      npub: nip19.npubEncode(pubkey),
-    };
+    if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+      const pubkey = trimmed.toLowerCase();
+      return {
+        pubkey,
+        npub: nip19.npubEncode(pubkey),
+      };
+    }
+  } catch {
+    return null;
   }
 
   return null;
@@ -213,7 +219,10 @@ async function deriveSharedAesKey(passphrase: string, salt: Uint8Array): Promise
   );
 }
 
-export async function encryptAesLayer(plaintext: string, passphrase: string): Promise<{
+export async function encryptAesLayer(
+  plaintext: string,
+  passphrase: string
+): Promise<{
   salt: string;
   iv: string;
   ciphertext: string;
@@ -268,7 +277,7 @@ export function isSafeAvatarDataUrl(url?: unknown): url is string {
 }
 
 /**
- * Compresses a user-selected image to a 96x96 square on an HTML5 Canvas.
+ * Compresses a user-selected image to an 80x80 square on an HTML5 Canvas.
  * Re-encoding pixels strips all EXIF, GPS location, and camera metadata.
  * Stored strictly as an inline data URL so zero external HTTP requests (no IP leak) ever occur.
  */
@@ -289,7 +298,7 @@ export async function compressAvatarToDataUrl(file: File): Promise<string> {
       el.src = objectUrl;
     });
 
-    const size = 96;
+    const size = 80;
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
@@ -305,11 +314,11 @@ export async function compressAvatarToDataUrl(file: File): Promise<string> {
     if (!dataUrl.startsWith('data:image/webp')) {
       dataUrl = canvas.toDataURL('image/jpeg', 0.72);
     }
-    if (dataUrl.length > 22_000) {
-      dataUrl = canvas.toDataURL('image/jpeg', 0.52);
+    if (dataUrl.length > 16_000) {
+      dataUrl = canvas.toDataURL('image/jpeg', 0.5);
     }
     if (!isSafeAvatarDataUrl(dataUrl)) {
-      throw new Error('Görsel yeterince küçültülemedi, daha küçük bir fotoğraf deneyin.');
+      throw new Error('Görsel küçültülemedi, daha küçük bir fotoğraf seçin.');
     }
     return dataUrl;
   } finally {
@@ -317,50 +326,75 @@ export async function compressAvatarToDataUrl(file: File): Promise<string> {
   }
 }
 
+function stripUnsafeChars(input: string): string {
+  // Remove ASCII control chars (except \n and \t) and Unicode bidirectional override chars
+  return input.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u202A-\u202E\u2066-\u2069]/g, '');
+}
+
+const VALID_KINDS = new Set<EnvelopeKind>([
+  'msg',
+  'ttl_sync',
+  'burn_chat',
+  'delete_msg',
+  'typing',
+  'react',
+  'remove_peer',
+]);
+
+const ALLOWED_REACTIONS = new Set(['👍', '❤️', '😂', '🔥', '😮', '😢']);
+
 /**
- * Wraps a message using NIP-59 / NIP-17 triple-layer privacy AND produces
- * an independent encrypted self-copy so all devices logged into the same account sync.
+ * Wraps a message or control envelope using NIP-59 / NIP-17 triple-layer privacy
+ * and optionally produces an encrypted self-copy for multi-device synchronization.
  */
 export async function createEphemeralGiftWrap(params: {
   senderIdentity: LocalIdentity;
   recipientPubkey: string;
   recipientHandle?: string;
-  kind: 'msg' | 'ttl_sync' | 'burn_chat' | 'delete_msg';
+  kind: EnvelopeKind;
   text: string;
   ttlHours: TTLHours;
   burnAfterSec?: number;
   blockPaddingBytes: 1024 | 2048;
   sharedSecret?: string;
   targetMsgId?: string;
+  reaction?: string;
   replyTo?: { id: string; preview: string };
   includeSelfCopy?: boolean;
+  selfOnly?: boolean;
 }): Promise<{
-  giftWrap: Event;
+  giftWrap?: Event;
   selfWrap?: Event;
   rumorId: string;
   sentAt: number;
   expiresAt: number;
 }> {
   const sentAt = Date.now();
-  const expiresAt = params.burnAfterSec
-    ? sentAt + params.burnAfterSec * 1000
-    : sentAt + params.ttlHours * 3600_000;
+  const expiresAt =
+    params.kind === 'typing'
+      ? sentAt + 20_000
+      : params.burnAfterSec
+      ? sentAt + params.burnAfterSec * 1000
+      : sentAt + params.ttlHours * 3600_000;
+
   const rumorId = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+  const attachAvatar =
+    (params.kind === 'msg' || params.kind === 'ttl_sync') &&
+    isSafeAvatarDataUrl(params.senderIdentity.avatarDataUrl);
 
   let basePayload: DecryptedEnvelopePayload = {
     v: 1,
     kind: params.kind,
     id: rumorId,
-    text: params.text,
+    text: params.text.slice(0, 8000),
     ttlHours: params.ttlHours,
     burnAfterSec: params.burnAfterSec,
     sentAt,
     expiresAt,
-    senderHandle: params.senderIdentity.handle,
-    senderAvatar: isSafeAvatarDataUrl(params.senderIdentity.avatarDataUrl)
-      ? params.senderIdentity.avatarDataUrl
-      : undefined,
+    senderHandle: params.senderIdentity.handle.slice(0, 48),
+    senderAvatar: attachAvatar ? params.senderIdentity.avatarDataUrl : undefined,
     targetMsgId: params.targetMsgId,
+    reaction: params.reaction?.slice(0, 16),
     replyToId: params.replyTo?.id,
     replyToPreview: params.replyTo?.preview.slice(0, 100),
     pad: '',
@@ -424,14 +458,14 @@ export async function createEphemeralGiftWrap(params: {
     );
   };
 
-  const giftWrap = buildWrapFor(params.recipientPubkey, basePayload);
+  const giftWrap = params.selfOnly ? undefined : buildWrapFor(params.recipientPubkey, basePayload);
 
   let selfWrap: Event | undefined;
-  if (params.includeSelfCopy !== false) {
+  if (params.selfOnly || params.includeSelfCopy !== false) {
     selfWrap = buildWrapFor(params.senderIdentity.pubkey, {
       ...basePayload,
       targetPeerPubkey: params.recipientPubkey,
-      targetPeerHandle: params.recipientHandle,
+      targetPeerHandle: params.recipientHandle?.slice(0, 48),
     });
   }
 
@@ -475,20 +509,29 @@ export async function unwrapEphemeralGiftWrap(
     const parsed = JSON.parse(rumor.content) as Partial<DecryptedEnvelopePayload>;
     if (
       parsed.v !== 1 ||
-      (parsed.kind !== 'msg' &&
-        parsed.kind !== 'ttl_sync' &&
-        parsed.kind !== 'burn_chat' &&
-        parsed.kind !== 'delete_msg') ||
+      !parsed.kind ||
+      !VALID_KINDS.has(parsed.kind) ||
       typeof parsed.id !== 'string' ||
+      !/^[0-9a-f]{16,64}$/i.test(parsed.id) ||
       typeof parsed.sentAt !== 'number' ||
       typeof parsed.expiresAt !== 'number' ||
-      (parsed.ttlHours !== 24 && parsed.ttlHours !== 12 && parsed.ttlHours !== 7 && parsed.ttlHours !== 1)
+      !Number.isFinite(parsed.sentAt) ||
+      !Number.isFinite(parsed.expiresAt) ||
+      (parsed.ttlHours !== 24 &&
+        parsed.ttlHours !== 12 &&
+        parsed.ttlHours !== 7 &&
+        parsed.ttlHours !== 1)
     ) {
       return null;
     }
 
-    // Discard already-expired envelopes immediately before persisting
-    if (parsed.expiresAt <= Date.now()) {
+    // Clamp max lifetime to 24h + 60s clock slack to prevent malicious permanent retention
+    const clampedExpiresAt = Math.min(
+      parsed.expiresAt,
+      parsed.sentAt + 24 * 3600_000 + 60_000
+    );
+
+    if (clampedExpiresAt <= Date.now()) {
       return null;
     }
 
@@ -497,27 +540,29 @@ export async function unwrapEphemeralGiftWrap(
         ? parsed.targetPeerPubkey.toLowerCase()
         : undefined;
 
-    let text = typeof parsed.text === 'string' ? parsed.text : '';
+    let text = typeof parsed.text === 'string' ? parsed.text.slice(0, 8000) : '';
     let doubleEncrypted = false;
     let needsSharedSecret = false;
 
-    if (parsed.aesCiphertext && parsed.aesIv && parsed.aesSalt) {
+    if (parsed.aesCiphertext && parsed.aesIv && parsed.aesSalt && parsed.kind === 'msg') {
       doubleEncrypted = true;
       const secretOwnerKey = targetPeerPubkey ?? seal.pubkey;
       const secret = getSharedSecret?.(secretOwnerKey);
       if (!secret) {
         needsSharedSecret = true;
-        text = '🔒 Bu mesaj ek ortak parola ile şifrelenmiş. Sohbet ayarlarından parolayı girin.';
+        text = '🔒 Bu mesaj ek ortak parola ile şifrelenmiş. Doğrula bölümünden parolayı girin.';
       } else {
         try {
-          text = await decryptAesLayer(
-            {
-              salt: parsed.aesSalt,
-              iv: parsed.aesIv,
-              ciphertext: parsed.aesCiphertext,
-            },
-            secret
-          );
+          text = (
+            await decryptAesLayer(
+              {
+                salt: parsed.aesSalt,
+                iv: parsed.aesIv,
+                ciphertext: parsed.aesCiphertext,
+              },
+              secret
+            )
+          ).slice(0, 8000);
         } catch {
           needsSharedSecret = true;
           text = '🔒 Ek ortak parola eşleşmediği için mesaj çözülemedi.';
@@ -529,28 +574,46 @@ export async function unwrapEphemeralGiftWrap(
       senderPubkey: seal.pubkey,
       doubleEncrypted,
       needsSharedSecret,
-      payload: {
+        payload: {
         v: 1,
         kind: parsed.kind,
         id: parsed.id,
-        text,
+        text: stripUnsafeChars(text),
         ttlHours: parsed.ttlHours,
         burnAfterSec:
-          typeof parsed.burnAfterSec === 'number' && parsed.burnAfterSec > 0 && parsed.burnAfterSec <= 300
+          typeof parsed.burnAfterSec === 'number' &&
+          parsed.burnAfterSec > 0 &&
+          parsed.burnAfterSec <= 300
             ? parsed.burnAfterSec
             : undefined,
         sentAt: parsed.sentAt,
-        expiresAt: parsed.expiresAt,
+        expiresAt: clampedExpiresAt,
         senderHandle:
           typeof parsed.senderHandle === 'string'
-            ? parsed.senderHandle
+            ? stripUnsafeChars(parsed.senderHandle).slice(0, 48)
             : `anonim#${seal.pubkey.slice(0, 4)}`,
         senderAvatar: isSafeAvatarDataUrl(parsed.senderAvatar) ? parsed.senderAvatar : undefined,
         targetPeerPubkey,
-        targetPeerHandle: typeof parsed.targetPeerHandle === 'string' ? parsed.targetPeerHandle : undefined,
-        targetMsgId: typeof parsed.targetMsgId === 'string' ? parsed.targetMsgId : undefined,
-        replyToId: typeof parsed.replyToId === 'string' ? parsed.replyToId : undefined,
-        replyToPreview: typeof parsed.replyToPreview === 'string' ? parsed.replyToPreview : undefined,
+        targetPeerHandle:
+          typeof parsed.targetPeerHandle === 'string'
+            ? stripUnsafeChars(parsed.targetPeerHandle).slice(0, 48)
+            : undefined,
+        targetMsgId:
+          typeof parsed.targetMsgId === 'string' && /^[0-9a-f]{16,64}$/i.test(parsed.targetMsgId)
+            ? parsed.targetMsgId
+            : undefined,
+        reaction:
+          typeof parsed.reaction === 'string' && ALLOWED_REACTIONS.has(parsed.reaction)
+            ? parsed.reaction
+            : undefined,
+        replyToId:
+          typeof parsed.replyToId === 'string' && /^[0-9a-f]{16,64}$/i.test(parsed.replyToId)
+            ? parsed.replyToId
+            : undefined,
+        replyToPreview:
+          typeof parsed.replyToPreview === 'string'
+            ? stripUnsafeChars(parsed.replyToPreview).slice(0, 120)
+            : undefined,
         pad: '',
       },
     };

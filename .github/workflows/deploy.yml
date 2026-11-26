@@ -1,4 +1,4 @@
-name: Deploy Kapsul to GitHub Pages
+name: Deploy Golge to GitHub Pages
 
 on:
   push:

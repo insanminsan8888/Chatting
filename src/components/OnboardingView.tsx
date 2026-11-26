@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { AlertTriangle, ArrowRight, Camera, KeyRound, Lock, Shield, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Camera, KeyRound, Lock, X } from 'lucide-react';
 import { compressAvatarToDataUrl, sanitizeUsername } from '../lib/crypto';
+import { BrandLogo } from './BrandLogo';
 
 interface OnboardingViewProps {
   onCreateIdentity: (username: string, pin?: string, avatarDataUrl?: string) => Promise<void>;
@@ -71,11 +72,9 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
       <div className="flex-1 flex flex-col justify-between p-6 sm:p-10 lg:p-16 border-b lg:border-b-0 lg:border-r border-blue-500/20">
         <div>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600/25 to-rose-600/25 border border-blue-400/35 shadow-[0_0_20px_rgba(37,99,235,0.28)] flex items-center justify-center text-rose-400">
-              <Shield className="w-5 h-5" />
-            </div>
+            <BrandLogo size="md" />
             <span className="text-2xl font-bold tracking-tight font-['Plus_Jakarta_Sans'] text-white">
-              Kapsül
+              Gölge
             </span>
           </div>
 

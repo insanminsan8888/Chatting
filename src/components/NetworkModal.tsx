@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Camera, Check, Copy, EyeOff, Key, Lock, Plus, Radio, Trash2, Volume2, X } from 'lucide-react';
 import type { LocalIdentity, PrivacySettings, RelayHealth } from '../types/kapsul';
 import { compressAvatarToDataUrl, exportNsec } from '../lib/crypto';
+import { ConnectionVisual } from './ConnectionVisual';
 
 interface NetworkModalProps {
   identity: LocalIdentity;
@@ -11,6 +12,7 @@ interface NetworkModalProps {
   onUpdateAvatar: (avatarDataUrl: string | undefined) => Promise<void>;
   onSetOrChangePin: (newPin: string | null) => Promise<void>;
   onReconnectRelays: () => void;
+  onRequestDeleteAccount: () => void;
   onClose: () => void;
 }
 
@@ -22,6 +24,7 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
   onUpdateAvatar,
   onSetOrChangePin,
   onReconnectRelays,
+  onRequestDeleteAccount,
   onClose,
 }) => {
   const [newRelay, setNewRelay] = useState('');
@@ -51,7 +54,9 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
     const trimmed = newRelay.trim();
     if (!trimmed) return;
     try {
-      const url = new URL(trimmed.startsWith('wss://') || trimmed.startsWith('ws://') ? trimmed : `wss://${trimmed}`);
+      const url = new URL(
+        trimmed.startsWith('wss://') || trimmed.startsWith('ws://') ? trimmed : `wss://${trimmed}`
+      );
       if (url.protocol !== 'wss:') {
         setRelayError('Yalnızca wss:// adresi eklenebilir.');
         return;
@@ -114,7 +119,7 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
               Profil ve Ayarlar
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Görünüm, ses, gizli anahtar ve röle bağlantıları
+              Görünüm, ses, gizli anahtar ve ağ bağlantısı
             </p>
           </div>
           <button
@@ -128,6 +133,9 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
         </div>
 
         <div className="mt-5 space-y-6">
+          {/* Connection Status Visual Banner */}
+          <ConnectionVisual relayHealth={relayHealth} variant="banner" />
+
           {/* Profile Avatar */}
           <section className="p-4 rounded-xl bg-[#070A12] border border-blue-500/20 flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3.5 min-w-0">
@@ -334,7 +342,11 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
                           : 'text-rose-400'
                       }`}
                     >
-                      {relay.status === 'connected' ? 'Bağlı' : relay.status === 'connecting' ? 'Bekliyor' : 'Kapalı'}
+                      {relay.status === 'connected'
+                        ? 'Bağlı'
+                        : relay.status === 'connecting'
+                        ? 'Bekliyor'
+                        : 'Kapalı'}
                     </span>
                     {settings.relays.length > 1 && (
                       <button
@@ -368,6 +380,26 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
               </button>
             </form>
             {relayError && <p className="mt-1.5 text-xs text-rose-400">{relayError}</p>}
+          </section>
+
+          {/* Danger Zone: Delete Account */}
+          <section className="pt-4 border-t border-rose-500/20 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-rose-300">Hesabı Kalıcı Sil</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Kullanıcı adını arama listesinden siler ve tüm verileri yok eder.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onRequestDeleteAccount();
+              }}
+              className="h-10 px-4 rounded-xl bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/40 text-xs font-semibold text-rose-200 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Hesabı Sil
+            </button>
           </section>
         </div>
       </div>
