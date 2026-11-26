@@ -6,13 +6,17 @@ import {
   EyeOff,
   Flame,
   Lock,
+  LogOut,
   Radio,
+  Reply,
   Search,
   Send,
   Share2,
   Shield,
   ShieldCheck,
+  Trash2,
   UserPlus,
+  X,
 } from 'lucide-react';
 import {
   TTL_OPTIONS,
@@ -25,7 +29,7 @@ import {
   type RelayHealth,
   type TTLHours,
 } from '../types/kapsul';
-import { parsePeerInput } from '../lib/crypto';
+import { isSafeAvatarDataUrl, parsePeerInput } from '../lib/crypto';
 
 interface ChatWorkspaceProps {
   identity: LocalIdentity;
@@ -40,13 +44,25 @@ interface ChatWorkspaceProps {
   onTogglePrivacyBlur: () => void;
   onSelectPeer: (pubkey: string | null) => void;
   onSearchUsers: (query: string) => Promise<DiscoveredUser[]>;
-  onAddPeer: (peer: { pubkey: string; username?: string; handle?: string; npub: string }) => void;
-  onSendMessage: (peerPubkey: string, text: string) => Promise<void>;
+  onAddPeer: (peer: {
+    pubkey: string;
+    username?: string;
+    handle?: string;
+    npub: string;
+    avatarDataUrl?: string;
+  }) => void;
+  onSendMessage: (
+    peerPubkey: string,
+    text: string,
+    replyTo?: { id: string; preview: string }
+  ) => Promise<void>;
+  onDeleteMessage: (msg: ChatMessage, scope: 'local' | 'both') => Promise<void>;
   onChangeChatTTL: (peerPubkey: string, ttl: TTLHours) => Promise<void>;
   onOpenInvite: () => void;
   onOpenNetwork: () => void;
   onOpenSafety: (peer: PeerContact) => void;
   onLockVault: () => void;
+  onRequestLogout: () => void;
   onRequestBurnChat: (peer: PeerContact) => void;
   onRequestPanicWipe: () => void;
 }
@@ -68,6 +84,29 @@ function formatClock(ms: number): string {
   });
 }
 
+const AvatarCircle: React.FC<{
+  name: string;
+  avatarDataUrl?: string;
+  sizeClass?: string;
+}> = ({ name, avatarDataUrl, sizeClass = 'w-9 h-9 text-xs' }) => {
+  if (isSafeAvatarDataUrl(avatarDataUrl)) {
+    return (
+      <img
+        src={avatarDataUrl}
+        alt={name}
+        className={`${sizeClass} rounded-xl object-cover border border-white/10 shrink-0`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${sizeClass} rounded-xl bg-[#161B24] border border-white/[0.08] flex items-center justify-center font-bold text-emerald-400 shrink-0 select-none`}
+    >
+      {(name.trim().slice(0, 1) || '?').toUpperCase()}
+    </div>
+  );
+};
+
 export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   identity,
   contacts,
@@ -83,11 +122,13 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   onSearchUsers,
   onAddPeer,
   onSendMessage,
+  onDeleteMessage,
   onChangeChatTTL,
   onOpenInvite,
   onOpenNetwork,
   onOpenSafety,
   onLockVault,
+  onRequestLogout,
   onRequestBurnChat,
   onRequestPanicWipe,
 }) => {
@@ -97,6 +138,10 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   const [searchTouched, setSearchTouched] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<{ id: string; preview: string } | null>(null);
+  const [deleteMenuMsgId, setDeleteMenuMsgId] = useState<string | null>(null);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const connectedRelayCount = relayHealth.filter((r) => r.status === 'connected').length;
@@ -107,8 +152,20 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
   const activeMessages = activePeerPubkey
     ? messages
         .filter((m) => m.peerPubkey === activePeerPubkey && m.expiresAt > nowMs)
+        .filter((m) =>
+          chatSearchOpen && chatSearchQuery.trim()
+            ? m.text.toLowerCase().includes(chatSearchQuery.trim().toLowerCase())
+            : true
+        )
         .sort((a, b) => a.createdAt - b.createdAt)
     : [];
+
+  useEffect(() => {
+    setReplyTarget(null);
+    setDeleteMenuMsgId(null);
+    setChatSearchOpen(false);
+    setChatSearchQuery('');
+  }, [activePeerPubkey]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -145,10 +202,12 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
     if (!activePeer || sending) return;
     const text = draft.trim();
     if (!text) return;
+    const currentReply = replyTarget ?? undefined;
     setDraft('');
+    setReplyTarget(null);
     setSending(true);
     try {
-      await onSendMessage(activePeer.pubkey, text);
+      await onSendMessage(activePeer.pubkey, text, currentReply);
     } finally {
       setSending(false);
     }
@@ -165,7 +224,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
 
   return (
     <div className="h-screen w-full bg-[#090B0F] text-[#F1F5F9] flex overflow-hidden">
-      {/* Left Sidebar: Hidden on mobile when a chat is open */}
+      {/* Left Sidebar */}
       <aside
         className={`${
           activePeerPubkey ? 'hidden lg:flex' : 'flex'
@@ -173,23 +232,33 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
       >
         {/* Top Identity Strip */}
         <div className="px-4 py-3.5 border-b border-white/[0.07] flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-bold text-base tracking-tight text-white font-['Plus_Jakarta_Sans'] truncate">
-                Kapsül
-              </span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <button
+              type="button"
+              onClick={onOpenNetwork}
+              title="Profil fotoğrafı ve ayarlar"
+              className="cursor-pointer rounded-xl focus-visible:outline-emerald-500"
+            >
+              <AvatarCircle name={identity.username} avatarDataUrl={identity.avatarDataUrl} />
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="font-bold text-sm tracking-tight text-white font-['Plus_Jakarta_Sans'] truncate">
+                  Kapsül
+                </span>
+              </div>
+              <p className="mt-0.5 font-mono text-xs text-emerald-400 truncate">{identity.handle}</p>
             </div>
-            <p className="mt-0.5 font-mono text-xs text-emerald-400 truncate">{identity.handle}</p>
           </div>
 
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0">
             <button
               type="button"
               onClick={onOpenInvite}
               title="Davet linki ve QR kod"
               aria-label="Davet paylaş"
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
             >
               <Share2 className="w-4 h-4" />
             </button>
@@ -200,7 +269,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                 onClick={onLockVault}
                 title="Kasayı kilitle"
                 aria-label="Kasayı kilitle"
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
+                className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/[0.06] transition-colors cursor-pointer"
               >
                 <Lock className="w-4 h-4" />
               </button>
@@ -208,10 +277,20 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
 
             <button
               type="button"
+              onClick={onRequestLogout}
+              title="Çıkış yap"
+              aria-label="Çıkış yap"
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+
+            <button
+              type="button"
               onClick={onRequestPanicWipe}
               title="Her Şeyi Yak (Acil Silme)"
               aria-label="Her Şeyi Yak"
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
             >
               <Flame className="w-4 h-4" />
             </button>
@@ -266,11 +345,18 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                       setSearchResults([]);
                       setSearchTouched(false);
                     }}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl bg-[#141821] hover:bg-[#1A202C] border border-white/[0.06] text-left transition-colors cursor-pointer"
+                    className="w-full flex items-center justify-between p-2.5 rounded-xl bg-[#141821] hover:bg-[#1A202C] border border-white/[0.06] text-left gap-2.5 transition-colors cursor-pointer"
                   >
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-white truncate">{user.handle}</p>
-                      <p className="font-mono text-[11px] text-slate-500 truncate">{user.npub.slice(0, 18)}...</p>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <AvatarCircle
+                        name={user.username}
+                        avatarDataUrl={user.avatarDataUrl}
+                        sizeClass="w-8 h-8 text-xs"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-white truncate">{user.handle}</p>
+                        <p className="font-mono text-[11px] text-slate-500 truncate">{user.npub.slice(0, 18)}...</p>
+                      </div>
                     </div>
                     <UserPlus className="w-4 h-4 text-emerald-400 shrink-0" />
                   </button>
@@ -313,24 +399,31 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                     key={thread.peerPubkey}
                     type="button"
                     onClick={() => onSelectPeer(thread.peerPubkey)}
-                    className={`w-full px-4 py-3.5 text-left transition-colors flex items-start justify-between gap-3 cursor-pointer ${
+                    className={`w-full px-4 py-3.5 text-left transition-colors flex items-center justify-between gap-3 cursor-pointer ${
                       isSelected ? 'bg-[#161B25]' : 'hover:bg-[#12161E]'
                     }`}
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-white truncate">{peer.handle}</span>
-                        {peer.verifiedFingerprint && (
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        )}
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <AvatarCircle
+                        name={peer.username}
+                        avatarDataUrl={peer.avatarDataUrl}
+                        sizeClass="w-10 h-10 text-sm"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-semibold text-white truncate">{peer.handle}</span>
+                          {peer.verifiedFingerprint && (
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-400 truncate">
+                          {privacyBlurred
+                            ? '•••••• (Ekran gizli)'
+                            : lastMsg
+                            ? lastMsg.text
+                            : 'Yeni şifreli sohbet'}
+                        </p>
                       </div>
-                      <p className="mt-1 text-xs text-slate-400 truncate">
-                        {privacyBlurred
-                          ? '•••••• (Ekran gizli)'
-                          : lastMsg
-                          ? lastMsg.text
-                          : 'Yeni şifreli sohbet'}
-                      </p>
                     </div>
                     <div className="shrink-0 text-right">
                       <span className="font-mono text-[11px] text-slate-400 tabular-nums">
@@ -407,7 +500,7 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                 className="h-11 px-5 rounded-xl bg-[#141821] hover:bg-[#1B202C] border border-white/[0.08] text-slate-200 text-sm font-medium inline-flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <Radio className="w-4 h-4 text-emerald-400" />
-                <span>Röle ve Güvenlik Ayarları</span>
+                <span>Profil &amp; Güvenlik Ayarları</span>
               </button>
             </div>
           </div>
@@ -424,6 +517,11 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
+                <AvatarCircle
+                  name={activePeer.username}
+                  avatarDataUrl={activePeer.avatarDataUrl}
+                  sizeClass="w-10 h-10 text-sm"
+                />
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-bold text-white truncate">{activePeer.handle}</h2>
@@ -463,6 +561,23 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
 
                 <button
                   type="button"
+                  onClick={() => {
+                    setChatSearchOpen((prev) => !prev);
+                    setChatSearchQuery('');
+                  }}
+                  title="Sohbet içinde ara"
+                  aria-label="Sohbette ara"
+                  className={`w-10 h-10 rounded-xl border border-white/[0.07] flex items-center justify-center transition-colors cursor-pointer ${
+                    chatSearchOpen
+                      ? 'bg-emerald-600/20 text-emerald-300'
+                      : 'bg-[#141821] hover:bg-[#1B202C] text-slate-300'
+                  }`}
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => onOpenSafety(activePeer)}
                   title="Güvenlik parmak izi ve ortak parola"
                   aria-label="Güvenlik parmak izi"
@@ -484,15 +599,44 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
               </div>
             </header>
 
+            {chatSearchOpen && (
+              <div className="px-4 sm:px-6 py-2.5 bg-[#0B0E14] border-b border-white/[0.07] flex items-center gap-2">
+                <Search className="w-4 h-4 text-slate-500 shrink-0" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={chatSearchQuery}
+                  onChange={(e) => setChatSearchQuery(e.target.value)}
+                  placeholder="Şifreli sohbet içinde ara..."
+                  className="flex-1 bg-transparent text-xs text-white placeholder:text-slate-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChatSearchOpen(false);
+                    setChatSearchQuery('');
+                  }}
+                  aria-label="Aramayı kapat"
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             {/* Message Stream */}
             <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 space-y-3 relative">
               {activeMessages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center px-4">
                   <p className="text-sm font-semibold text-slate-300">
-                    {activePeer.handle} ile şifreli oturum hazır
+                    {chatSearchQuery.trim()
+                      ? 'Aramayla eşleşen mesaj bulunamadı'
+                      : `${activePeer.handle} ile şifreli oturum hazır`}
                   </p>
                   <p className="mt-1.5 text-xs text-slate-500 max-w-sm leading-relaxed">
-                    Gönderdiğiniz tüm mesajlar cihazınızda {settings.blockPaddingBytes} baytlık sabit bloklara doldurulur ve {activeTTL} saat sonunda otomatik silinir.
+                    {chatSearchQuery.trim()
+                      ? 'Farklı bir kelime deneyin.'
+                      : `Gönderdiğiniz tüm mesajlar cihazınızda ${settings.blockPaddingBytes} baytlık sabit bloklara doldurulur ve ${activeTTL} saat sonunda otomatik silinir.`}
                   </p>
                 </div>
               ) : (
@@ -508,20 +652,93 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
                   }
 
                   const isMine = msg.direction === 'outgoing';
+                  const isDeleteMenuOpen = deleteMenuMsgId === msg.id;
+
                   return (
                     <div
                       key={msg.id}
-                      className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
+                      className={`group flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
                     >
                       <div
-                        className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap ${
-                          isMine
-                            ? 'bg-[#122922] border border-emerald-500/25 text-slate-100'
-                            : 'bg-[#141821] border border-white/[0.07] text-slate-100'
+                        className={`flex items-end gap-2 max-w-[92%] sm:max-w-[75%] ${
+                          isMine ? 'flex-row-reverse' : 'flex-row'
                         }`}
                       >
-                        {msg.text}
+                        <div
+                          className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed break-words whitespace-pre-wrap ${
+                            isMine
+                              ? 'bg-[#122922] border border-emerald-500/25 text-slate-100'
+                              : 'bg-[#141821] border border-white/[0.07] text-slate-100'
+                          }`}
+                        >
+                          {msg.replyToPreview && (
+                            <div className="mb-2 pb-1.5 border-b border-white/[0.08] text-xs text-slate-400 truncate max-w-[260px]">
+                              Yanıt: {msg.replyToPreview}
+                            </div>
+                          )}
+                          {msg.text}
+                        </div>
+
+                        {/* Message actions: Reply & Delete */}
+                        <div className="flex items-center gap-0.5 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setReplyTarget({ id: msg.id, preview: msg.text.slice(0, 80) })
+                            }
+                            title="Yanıtla"
+                            aria-label="Mesajı yanıtla"
+                            className="w-8 h-8 rounded-lg hover:bg-white/[0.06] text-slate-400 hover:text-white flex items-center justify-center cursor-pointer"
+                          >
+                            <Reply className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteMenuMsgId((prev) => (prev === msg.id ? null : msg.id))
+                            }
+                            title="Mesajı sil"
+                            aria-label="Mesajı sil"
+                            className="w-8 h-8 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-400 flex items-center justify-center cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
+
+                      {isDeleteMenuOpen && (
+                        <div className="mt-1.5 flex items-center gap-1.5 p-1 rounded-xl bg-[#141821] border border-white/[0.08]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteMenuMsgId(null);
+                              onDeleteMessage(msg, 'local');
+                            }}
+                            className="px-2.5 py-1 rounded-lg hover:bg-white/[0.06] text-[11px] font-medium text-slate-200 cursor-pointer whitespace-nowrap"
+                          >
+                            Benden Sil
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteMenuMsgId(null);
+                              onDeleteMessage(msg, 'both');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-red-600/20 hover:bg-red-600/35 text-[11px] font-semibold text-red-300 cursor-pointer whitespace-nowrap"
+                          >
+                            İki Taraftan Sil
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeleteMenuMsgId(null)}
+                            aria-label="Vazgeç"
+                            className="px-1.5 py-1 text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+
                       <div className="mt-1 px-1 flex items-center gap-2 text-[11px] text-slate-500 tabular-nums">
                         <span>{formatClock(msg.createdAt)}</span>
                         <span aria-hidden="true">·</span>
@@ -572,6 +789,22 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
               onSubmit={handleSend}
               className="p-3 sm:p-4 border-t border-white/[0.07] bg-[#0D1016]"
             >
+              {replyTarget && (
+                <div className="mb-2.5 px-3 py-2 rounded-xl bg-[#141821] border border-white/[0.07] flex items-center justify-between gap-3">
+                  <div className="min-w-0 text-xs text-slate-300 truncate">
+                    <span className="text-emerald-400 font-medium">Yanıtlanıyor:</span>{' '}
+                    {replyTarget.preview}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReplyTarget(null)}
+                    aria-label="Yanıtı iptal et"
+                    className="text-slate-400 hover:text-white cursor-pointer shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
               <div className="flex items-end gap-2.5">
                 <textarea
                   rows={1}

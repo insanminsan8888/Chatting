@@ -2,7 +2,7 @@ import { SimplePool } from 'nostr-tools/pool';
 import { finalizeEvent, type Event } from 'nostr-tools/pure';
 import * as nip19 from 'nostr-tools/nip19';
 import type { DiscoveredUser, LocalIdentity, RelayHealth } from '../types/kapsul';
-import { formatHandle, hexToBytes, sanitizeUsername } from './crypto';
+import { formatHandle, hexToBytes, isSafeAvatarDataUrl, sanitizeUsername } from './crypto';
 
 export const DEFAULT_RELAYS: string[] = [
   'wss://relay.damus.io',
@@ -72,6 +72,15 @@ export class RelayNetwork {
 
   public async publishIdentityAnnouncement(identity: LocalIdentity): Promise<number> {
     const sk = hexToBytes(identity.secretKeyHex);
+    const contentPayload: Record<string, unknown> = {
+      name: identity.username,
+      display_name: identity.handle,
+      kapsul: 1,
+    };
+    if (isSafeAvatarDataUrl(identity.avatarDataUrl)) {
+      contentPayload.picture = identity.avatarDataUrl;
+    }
+
     const evt = finalizeEvent(
       {
         kind: 0,
@@ -80,11 +89,7 @@ export class RelayNetwork {
           ['t', APP_TAG],
           ['name', identity.username.toLowerCase()],
         ],
-        content: JSON.stringify({
-          name: identity.username,
-          display_name: identity.handle,
-          kapsul: 1,
-        }),
+        content: JSON.stringify(contentPayload),
       },
       sk
     );
@@ -144,6 +149,7 @@ export class RelayNetwork {
         const data = JSON.parse(ev.content) as {
           name?: unknown;
           display_name?: unknown;
+          picture?: unknown;
           kapsul?: unknown;
         };
         if (typeof data.name !== 'string') continue;
@@ -162,6 +168,7 @@ export class RelayNetwork {
             username,
             handle,
             npub: nip19.npubEncode(ev.pubkey),
+            avatarDataUrl: isSafeAvatarDataUrl(data.picture) ? data.picture : undefined,
             publishedAt: ev.created_at,
           });
         }
@@ -171,6 +178,32 @@ export class RelayNetwork {
     }
 
     return Array.from(found.values()).sort((a, b) => b.publishedAt - a.publishedAt);
+  }
+
+  public async fetchPeerProfile(pubkey: string): Promise<DiscoveredUser | null> {
+    try {
+      const ev = await this.pool.get(this.relays, {
+        kinds: [0],
+        authors: [pubkey],
+      });
+      if (!ev) return null;
+      const data = JSON.parse(ev.content) as {
+        name?: unknown;
+        picture?: unknown;
+      };
+      const username = typeof data.name === 'string' ? sanitizeUsername(data.name) : '';
+      if (!username) return null;
+      return {
+        pubkey: ev.pubkey,
+        username,
+        handle: formatHandle(username, ev.pubkey),
+        npub: nip19.npubEncode(ev.pubkey),
+        avatarDataUrl: isSafeAvatarDataUrl(data.picture) ? data.picture : undefined,
+        publishedAt: ev.created_at,
+      };
+    } catch {
+      return null;
+    }
   }
 
   public subscribeGiftWraps(

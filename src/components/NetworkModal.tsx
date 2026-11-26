@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
-import { Copy, Check, EyeOff, Key, Lock, Plus, Radio, Shield, Trash2, X } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Camera, Copy, Check, EyeOff, Key, Lock, Plus, Radio, Shield, Trash2, X } from 'lucide-react';
 import type { LocalIdentity, PrivacySettings, RelayHealth } from '../types/kapsul';
-import { exportNsec } from '../lib/crypto';
+import { compressAvatarToDataUrl, exportNsec } from '../lib/crypto';
 
 interface NetworkModalProps {
   identity: LocalIdentity;
   settings: PrivacySettings;
   relayHealth: RelayHealth[];
   onUpdateSettings: (next: Partial<PrivacySettings>) => void;
+  onUpdateAvatar: (avatarDataUrl: string | undefined) => Promise<void>;
   onSetOrChangePin: (newPin: string | null) => Promise<void>;
   onReconnectRelays: () => void;
   onClose: () => void;
@@ -18,6 +19,7 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
   settings,
   relayHealth,
   onUpdateSettings,
+  onUpdateAvatar,
   onSetOrChangePin,
   onReconnectRelays,
   onClose,
@@ -26,8 +28,22 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
   const [relayError, setRelayError] = useState<string | null>(null);
   const [newPin, setNewPin] = useState('');
   const [pinSavedMsg, setPinSavedMsg] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [showNsec, setShowNsec] = useState(false);
   const [copiedNsec, setCopiedNsec] = useState(false);
+  const avatarFileRef = useRef<HTMLInputElement | null>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarError(null);
+    try {
+      const compressed = await compressAvatarToDataUrl(file);
+      await onUpdateAvatar(compressed);
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : 'Fotoğraf güncellenemedi.');
+    }
+  };
 
   const handleAddRelay = (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,6 +128,56 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
         </div>
 
         <div className="mt-6 space-y-7">
+          {/* Serverless Profile Avatar */}
+          <section className="p-4 rounded-xl bg-[#090B0F] border border-white/[0.07] flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5 min-w-0">
+              {identity.avatarDataUrl ? (
+                <img
+                  src={identity.avatarDataUrl}
+                  alt={identity.handle}
+                  className="w-12 h-12 rounded-xl object-cover border border-emerald-500/35 shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-xl bg-[#141821] border border-white/10 flex items-center justify-center text-base font-bold text-emerald-400 shrink-0">
+                  {identity.username.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{identity.handle}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                  Sunucusuz profil fotoğrafı (EXIF/GPS verileri silinir, IP sızdırmaz).
+                </p>
+                {avatarError && <p className="mt-1 text-xs text-red-400">{avatarError}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                ref={avatarFileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleAvatarUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => avatarFileRef.current?.click()}
+                className="h-9 px-3 rounded-lg bg-[#171B24] hover:bg-[#1E2430] border border-white/[0.08] text-xs font-medium text-white inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{identity.avatarDataUrl ? 'Değiştir' : 'Fotoğraf Seç'}</span>
+              </button>
+              {identity.avatarDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => onUpdateAvatar(undefined)}
+                  className="h-9 px-3 rounded-lg bg-[#171B24] hover:bg-red-500/15 text-xs font-medium text-red-400 cursor-pointer"
+                >
+                  Kaldır
+                </button>
+              )}
+            </div>
+          </section>
+
           {/* Architecture & Honest ISP Note */}
           <section className="p-4 rounded-xl bg-[#090B0F] border border-white/[0.07]">
             <div className="flex items-center gap-2 text-sm font-semibold text-white">
@@ -278,6 +344,27 @@ export const NetworkModal: React.FC<NetworkModalProps> = ({
                 )}
               </div>
               {pinSavedMsg && <p className="mt-2 text-xs text-emerald-400">{pinSavedMsg}</p>}
+              {settings.hasPin && (
+                <div className="mt-4 pt-3 border-t border-white/[0.07]">
+                  <p className="text-[11px] text-slate-400 mb-2">Hareketsizlik Otomatik Kilidi</p>
+                  <div className="flex gap-1.5">
+                    {([0, 5, 15] as const).map((mins) => (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => onUpdateSettings({ autoLockMinutes: mins })}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
+                          settings.autoLockMinutes === mins
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#171B24] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {mins === 0 ? 'Kapalı' : `${mins} dk`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </form>
 
             <div className="p-4 rounded-xl bg-[#090B0F] border border-white/[0.07]">

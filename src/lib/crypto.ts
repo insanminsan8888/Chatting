@@ -261,23 +261,81 @@ function randomizedPastTimestamp(): number {
   return nowSec - jitter;
 }
 
+const SAFE_AVATAR_REGEX = /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/;
+
+export function isSafeAvatarDataUrl(url?: unknown): url is string {
+  return typeof url === 'string' && url.length <= 24_000 && SAFE_AVATAR_REGEX.test(url);
+}
+
 /**
- * Wraps a message using NIP-59 / NIP-17 triple-layer privacy:
- * 1. Optional inner AES-256-GCM layer (when shared chat passphrase is set)
- * 2. Fixed-size block padding (masks message length from traffic observers)
- * 3. NIP-44 Seal (Kind 13) signed by real sender, encrypted to recipient (no p-tags, jittered timestamp)
- * 4. NIP-44 Gift Wrap (Kind 1059) signed by a disposable one-time random keypair + NIP-40 expiration
+ * Compresses a user-selected image to a 96x96 square on an HTML5 Canvas.
+ * Re-encoding pixels strips all EXIF, GPS location, and camera metadata.
+ * Stored strictly as an inline data URL so zero external HTTP requests (no IP leak) ever occur.
+ */
+export async function compressAvatarToDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Lütfen geçerli bir görsel dosyası seçin.');
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('Görsel boyutu 10 MB sınırını aşmamalıdır.');
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Görsel okunamadı.'));
+      el.src = objectUrl;
+    });
+
+    const size = 96;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Tarayıcı görsel işleyicisi başlatılamadı.');
+
+    const minSide = Math.min(img.width, img.height);
+    const sx = Math.floor((img.width - minSide) / 2);
+    const sy = Math.floor((img.height - minSide) / 2);
+    ctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, size, size);
+
+    let dataUrl = canvas.toDataURL('image/webp', 0.72);
+    if (!dataUrl.startsWith('data:image/webp')) {
+      dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    }
+    if (dataUrl.length > 22_000) {
+      dataUrl = canvas.toDataURL('image/jpeg', 0.52);
+    }
+    if (!isSafeAvatarDataUrl(dataUrl)) {
+      throw new Error('Görsel yeterince küçültülemedi, daha küçük bir fotoğraf deneyin.');
+    }
+    return dataUrl;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/**
+ * Wraps a message using NIP-59 / NIP-17 triple-layer privacy AND produces
+ * an independent encrypted self-copy so all devices logged into the same account sync.
  */
 export async function createEphemeralGiftWrap(params: {
   senderIdentity: LocalIdentity;
   recipientPubkey: string;
-  kind: 'msg' | 'ttl_sync' | 'burn_chat';
+  recipientHandle?: string;
+  kind: 'msg' | 'ttl_sync' | 'burn_chat' | 'delete_msg';
   text: string;
   ttlHours: TTLHours;
   blockPaddingBytes: 1024 | 2048;
   sharedSecret?: string;
+  targetMsgId?: string;
+  replyTo?: { id: string; preview: string };
+  includeSelfCopy?: boolean;
 }): Promise<{
   giftWrap: Event;
+  selfWrap?: Event;
   rumorId: string;
   sentAt: number;
   expiresAt: number;
@@ -286,7 +344,7 @@ export async function createEphemeralGiftWrap(params: {
   const expiresAt = sentAt + params.ttlHours * 3600_000;
   const rumorId = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
 
-  let payload: DecryptedEnvelopePayload = {
+  let basePayload: DecryptedEnvelopePayload = {
     v: 1,
     kind: params.kind,
     id: rumorId,
@@ -295,13 +353,19 @@ export async function createEphemeralGiftWrap(params: {
     sentAt,
     expiresAt,
     senderHandle: params.senderIdentity.handle,
+    senderAvatar: isSafeAvatarDataUrl(params.senderIdentity.avatarDataUrl)
+      ? params.senderIdentity.avatarDataUrl
+      : undefined,
+    targetMsgId: params.targetMsgId,
+    replyToId: params.replyTo?.id,
+    replyToPreview: params.replyTo?.preview.slice(0, 100),
     pad: '',
   };
 
   if (params.sharedSecret && params.sharedSecret.trim().length > 0 && params.kind === 'msg') {
     const aes = await encryptAesLayer(params.text, params.sharedSecret.trim());
-    payload = {
-      ...payload,
+    basePayload = {
+      ...basePayload,
       text: '',
       aesSalt: aes.salt,
       aesIv: aes.iv,
@@ -309,58 +373,71 @@ export async function createEphemeralGiftWrap(params: {
     };
   }
 
-  const baseLength = utf8Encoder.encode(JSON.stringify(payload)).length;
-  payload.pad = randomPaddingString(params.blockPaddingBytes, baseLength);
-
   const senderSk = hexToBytes(params.senderIdentity.secretKeyHex);
-  const rumor = {
-    id: rumorId,
-    kind: PrivateDirectMessage,
-    pubkey: params.senderIdentity.pubkey,
-    created_at: Math.floor(sentAt / 1000),
-    tags: [['p', params.recipientPubkey]],
-    content: JSON.stringify(payload),
-  };
-
-  // Seal (Kind 13) — hides sender inside recipient-encrypted envelope
-  const sealConvKey = nip44.v2.utils.getConversationKey(senderSk, params.recipientPubkey);
-  const sealContent = nip44.v2.encrypt(JSON.stringify(rumor), sealConvKey);
-  const seal = finalizeEvent(
-    {
-      kind: Seal,
-      created_at: randomizedPastTimestamp(),
-      tags: [],
-      content: sealContent,
-    },
-    senderSk
-  );
-
-  // Gift Wrap (Kind 1059) — signed with ephemeral one-time random key
-  const ephemeralSk = generateSecretKey();
-  const wrapConvKey = nip44.v2.utils.getConversationKey(ephemeralSk, params.recipientPubkey);
-  const wrapContent = nip44.v2.encrypt(JSON.stringify(seal), wrapConvKey);
   const expirationSec = Math.ceil(expiresAt / 1000);
 
-  const giftWrap = finalizeEvent(
-    {
-      kind: GiftWrap,
-      created_at: randomizedPastTimestamp(),
-      tags: [
-        ['p', params.recipientPubkey],
-        ['expiration', String(expirationSec)],
-      ],
-      content: wrapContent,
-    },
-    ephemeralSk
-  );
+  const buildWrapFor = (targetPubkey: string, payloadObj: DecryptedEnvelopePayload): Event => {
+    const sizedObj = { ...payloadObj, pad: '' };
+    const baseLen = utf8Encoder.encode(JSON.stringify(sizedObj)).length;
+    sizedObj.pad = randomPaddingString(params.blockPaddingBytes, baseLen);
 
-  return { giftWrap, rumorId, sentAt, expiresAt };
+    const rumor = {
+      id: rumorId,
+      kind: PrivateDirectMessage,
+      pubkey: params.senderIdentity.pubkey,
+      created_at: Math.floor(sentAt / 1000),
+      tags: [['p', params.recipientPubkey]],
+      content: JSON.stringify(sizedObj),
+    };
+
+    const sealConvKey = nip44.v2.utils.getConversationKey(senderSk, targetPubkey);
+    const sealContent = nip44.v2.encrypt(JSON.stringify(rumor), sealConvKey);
+    const seal = finalizeEvent(
+      {
+        kind: Seal,
+        created_at: randomizedPastTimestamp(),
+        tags: [],
+        content: sealContent,
+      },
+      senderSk
+    );
+
+    const ephemeralSk = generateSecretKey();
+    const wrapConvKey = nip44.v2.utils.getConversationKey(ephemeralSk, targetPubkey);
+    const wrapContent = nip44.v2.encrypt(JSON.stringify(seal), wrapConvKey);
+
+    return finalizeEvent(
+      {
+        kind: GiftWrap,
+        created_at: randomizedPastTimestamp(),
+        tags: [
+          ['p', targetPubkey],
+          ['expiration', String(expirationSec)],
+        ],
+        content: wrapContent,
+      },
+      ephemeralSk
+    );
+  };
+
+  const giftWrap = buildWrapFor(params.recipientPubkey, basePayload);
+
+  let selfWrap: Event | undefined;
+  if (params.includeSelfCopy !== false) {
+    selfWrap = buildWrapFor(params.senderIdentity.pubkey, {
+      ...basePayload,
+      targetPeerPubkey: params.recipientPubkey,
+      targetPeerHandle: params.recipientHandle,
+    });
+  }
+
+  return { giftWrap, selfWrap, rumorId, sentAt, expiresAt };
 }
 
 export async function unwrapEphemeralGiftWrap(
   wrapEvent: Event,
   recipientSecretKeyHex: string,
-  getSharedSecret?: (senderPubkey: string) => string | undefined
+  getSharedSecret?: (peerPubkey: string) => string | undefined
 ): Promise<{
   senderPubkey: string;
   payload: DecryptedEnvelopePayload;
@@ -394,7 +471,10 @@ export async function unwrapEphemeralGiftWrap(
     const parsed = JSON.parse(rumor.content) as Partial<DecryptedEnvelopePayload>;
     if (
       parsed.v !== 1 ||
-      (parsed.kind !== 'msg' && parsed.kind !== 'ttl_sync' && parsed.kind !== 'burn_chat') ||
+      (parsed.kind !== 'msg' &&
+        parsed.kind !== 'ttl_sync' &&
+        parsed.kind !== 'burn_chat' &&
+        parsed.kind !== 'delete_msg') ||
       typeof parsed.id !== 'string' ||
       typeof parsed.sentAt !== 'number' ||
       typeof parsed.expiresAt !== 'number' ||
@@ -408,13 +488,19 @@ export async function unwrapEphemeralGiftWrap(
       return null;
     }
 
+    const targetPeerPubkey =
+      typeof parsed.targetPeerPubkey === 'string' && /^[0-9a-f]{64}$/i.test(parsed.targetPeerPubkey)
+        ? parsed.targetPeerPubkey.toLowerCase()
+        : undefined;
+
     let text = typeof parsed.text === 'string' ? parsed.text : '';
     let doubleEncrypted = false;
     let needsSharedSecret = false;
 
     if (parsed.aesCiphertext && parsed.aesIv && parsed.aesSalt) {
       doubleEncrypted = true;
-      const secret = getSharedSecret?.(seal.pubkey);
+      const secretOwnerKey = targetPeerPubkey ?? seal.pubkey;
+      const secret = getSharedSecret?.(secretOwnerKey);
       if (!secret) {
         needsSharedSecret = true;
         text = '🔒 Bu mesaj ek ortak parola ile şifrelenmiş. Sohbet ayarlarından parolayı girin.';
@@ -447,7 +533,16 @@ export async function unwrapEphemeralGiftWrap(
         ttlHours: parsed.ttlHours,
         sentAt: parsed.sentAt,
         expiresAt: parsed.expiresAt,
-        senderHandle: typeof parsed.senderHandle === 'string' ? parsed.senderHandle : `anonim#${seal.pubkey.slice(0, 4)}`,
+        senderHandle:
+          typeof parsed.senderHandle === 'string'
+            ? parsed.senderHandle
+            : `anonim#${seal.pubkey.slice(0, 4)}`,
+        senderAvatar: isSafeAvatarDataUrl(parsed.senderAvatar) ? parsed.senderAvatar : undefined,
+        targetPeerPubkey,
+        targetPeerHandle: typeof parsed.targetPeerHandle === 'string' ? parsed.targetPeerHandle : undefined,
+        targetMsgId: typeof parsed.targetMsgId === 'string' ? parsed.targetMsgId : undefined,
+        replyToId: typeof parsed.replyToId === 'string' ? parsed.replyToId : undefined,
+        replyToPreview: typeof parsed.replyToPreview === 'string' ? parsed.replyToPreview : undefined,
         pad: '',
       },
     };

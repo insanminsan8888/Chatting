@@ -10,6 +10,7 @@ export interface LocalIdentity {
   pubkey: string; // 64-char hex secp256k1 pubkey
   secretKeyHex: string; // 64-char hex secp256k1 privkey (stored encrypted in IndexedDB)
   npub: string;
+  avatarDataUrl?: string; // EXIF-stripped inline data:image/webp;base64,... (zero IP leak)
   createdAt: number;
 }
 
@@ -18,6 +19,7 @@ export interface PeerContact {
   username: string;
   handle: string;
   npub: string;
+  avatarDataUrl?: string;
   verifiedFingerprint?: boolean;
   sharedSecret?: string; // Optional second-layer AES-256-GCM passphrase per chat
   addedAt: number;
@@ -39,6 +41,8 @@ export interface ChatMessage {
   delivery?: DeliveryState;
   relayCount?: number;
   doubleEncrypted?: boolean;
+  replyToId?: string;
+  replyToPreview?: string;
 }
 
 export interface ChatThread {
@@ -53,6 +57,7 @@ export interface PrivacySettings {
   blockPaddingBytes: 1024 | 2048;
   relays: string[];
   hasPin: boolean;
+  autoLockMinutes: 0 | 5 | 15;
 }
 
 export interface RelayHealth {
@@ -66,18 +71,27 @@ export interface DiscoveredUser {
   username: string;
   handle: string;
   npub: string;
+  avatarDataUrl?: string;
   publishedAt: number;
 }
 
+export type EnvelopeKind = 'msg' | 'ttl_sync' | 'burn_chat' | 'delete_msg';
+
 export interface DecryptedEnvelopePayload {
   v: 1;
-  kind: 'msg' | 'ttl_sync' | 'burn_chat';
+  kind: EnvelopeKind;
   id: string;
   text: string;
   ttlHours: TTLHours;
   sentAt: number;
   expiresAt: number;
   senderHandle: string;
+  senderAvatar?: string;
+  targetPeerPubkey?: string; // Set inside encrypted self-copy for multi-device sync
+  targetPeerHandle?: string;
+  targetMsgId?: string; // Used for delete_msg
+  replyToId?: string;
+  replyToPreview?: string;
   aesSalt?: string;
   aesIv?: string;
   aesCiphertext?: string;
