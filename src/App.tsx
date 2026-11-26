@@ -39,15 +39,17 @@ import { SafetyModal } from './components/SafetyModal';
 import { NetworkModal } from './components/NetworkModal';
 import { BurnModal } from './components/BurnModal';
 import { LogoutModal } from './components/LogoutModal';
+import { playIncomingPing } from './lib/sound';
 
 type AppScreen = 'booting' | 'onboarding' | 'locked' | 'ready';
 
 const DEFAULT_SETTINGS: PrivacySettings = {
-  autoBlurOnBackground: true,
+  autoBlurOnBackground: false,
   blockPaddingBytes: 1024,
   relays: DEFAULT_RELAYS,
   hasPin: false,
   autoLockMinutes: 0,
+  soundEnabled: true,
 };
 
 export default function App() {
@@ -75,6 +77,7 @@ export default function App() {
   const threadsRef = useRef<Record<string, ChatThread>>({});
   const messagesRef = useRef<ChatMessage[]>([]);
   const activePeerRef = useRef<string | null>(null);
+  const settingsRef = useRef<PrivacySettings>(DEFAULT_SETTINGS);
   const lastActivityRef = useRef<number>(Date.now());
 
   identityRef.current = identity;
@@ -82,6 +85,7 @@ export default function App() {
   threadsRef.current = threads;
   messagesRef.current = messages;
   activePeerRef.current = activePeerPubkey;
+  settingsRef.current = settings;
 
   const hydrateFromVault = useCallback(async (hasPin: boolean) => {
     const [savedIdentity, savedContacts, savedThreads, savedMessages, savedSettings] =
@@ -391,6 +395,7 @@ export default function App() {
       createdAt: payload.sentAt,
       expiresAt: payload.expiresAt,
       ttlHours: payload.ttlHours,
+      burnAfterSec: payload.burnAfterSec,
       delivery: isSelfSync ? 'relayed' : undefined,
       relayCount: isSelfSync ? 1 : undefined,
       doubleEncrypted,
@@ -402,6 +407,10 @@ export default function App() {
     messagesRef.current = nextMsgs;
     setMessages(nextMsgs);
     await saveEncryptedItem('messages', nextMsgs);
+
+    if (!isSelfSync && settingsRef.current.soundEnabled) {
+      playIncomingPing();
+    }
 
     const nextThreads = {
       ...threadsRef.current,
@@ -597,7 +606,10 @@ export default function App() {
   const handleSendMessage = async (
     peerPubkey: string,
     text: string,
-    replyTo?: { id: string; preview: string }
+    options?: {
+      replyTo?: { id: string; preview: string };
+      burnAfterSec?: number;
+    }
   ) => {
     if (!identity || !relayRef.current) return;
     const peer = contacts[peerPubkey];
@@ -611,9 +623,10 @@ export default function App() {
       kind: 'msg',
       text,
       ttlHours,
+      burnAfterSec: options?.burnAfterSec,
       blockPaddingBytes: settings.blockPaddingBytes,
       sharedSecret: peer?.sharedSecret,
-      replyTo,
+      replyTo: options?.replyTo,
       includeSelfCopy: true,
     });
 
@@ -625,10 +638,11 @@ export default function App() {
       createdAt: sentAt,
       expiresAt,
       ttlHours,
+      burnAfterSec: options?.burnAfterSec,
       delivery: 'sending',
       doubleEncrypted: Boolean(peer?.sharedSecret),
-      replyToId: replyTo?.id,
-      replyToPreview: replyTo?.preview,
+      replyToId: options?.replyTo?.id,
+      replyToPreview: options?.replyTo?.preview,
     };
 
     const withOptimistic = [...messagesRef.current, optimistic];
@@ -839,7 +853,7 @@ export default function App() {
 
   if (screen === 'booting') {
     return (
-      <div className="min-h-screen w-full bg-[#090B0F] flex items-center justify-center text-sm text-slate-400">
+      <div className="min-h-screen w-full bg-[#07080C] flex items-center justify-center text-sm text-slate-400">
         Şifreli kasa hazırlanıyor...
       </div>
     );

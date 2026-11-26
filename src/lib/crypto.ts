@@ -328,6 +328,7 @@ export async function createEphemeralGiftWrap(params: {
   kind: 'msg' | 'ttl_sync' | 'burn_chat' | 'delete_msg';
   text: string;
   ttlHours: TTLHours;
+  burnAfterSec?: number;
   blockPaddingBytes: 1024 | 2048;
   sharedSecret?: string;
   targetMsgId?: string;
@@ -341,7 +342,9 @@ export async function createEphemeralGiftWrap(params: {
   expiresAt: number;
 }> {
   const sentAt = Date.now();
-  const expiresAt = sentAt + params.ttlHours * 3600_000;
+  const expiresAt = params.burnAfterSec
+    ? sentAt + params.burnAfterSec * 1000
+    : sentAt + params.ttlHours * 3600_000;
   const rumorId = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
 
   let basePayload: DecryptedEnvelopePayload = {
@@ -350,6 +353,7 @@ export async function createEphemeralGiftWrap(params: {
     id: rumorId,
     text: params.text,
     ttlHours: params.ttlHours,
+    burnAfterSec: params.burnAfterSec,
     sentAt,
     expiresAt,
     senderHandle: params.senderIdentity.handle,
@@ -531,6 +535,10 @@ export async function unwrapEphemeralGiftWrap(
         id: parsed.id,
         text,
         ttlHours: parsed.ttlHours,
+        burnAfterSec:
+          typeof parsed.burnAfterSec === 'number' && parsed.burnAfterSec > 0 && parsed.burnAfterSec <= 300
+            ? parsed.burnAfterSec
+            : undefined,
         sentAt: parsed.sentAt,
         expiresAt: parsed.expiresAt,
         senderHandle:

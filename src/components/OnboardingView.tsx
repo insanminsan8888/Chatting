@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ArrowRight, Camera, KeyRound, Lock, Shield, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Camera, KeyRound, Lock, Shield, X } from 'lucide-react';
 import { compressAvatarToDataUrl, sanitizeUsername } from '../lib/crypto';
 
 interface OnboardingViewProps {
@@ -33,7 +33,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
       const compressed = await compressAvatarToDataUrl(file);
       setAvatarDataUrl(compressed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Profil fotoğrafı yüklenemedi.');
+      setError(err instanceof Error ? err.message : 'Fotoğraf yüklenemedi.');
     }
   };
 
@@ -42,11 +42,11 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
     setError(null);
     const clean = sanitizeUsername(username);
     if (clean.length < 2) {
-      setError('Kullanıcı adı en az 2 geçerli karakter olmalıdır.');
+      setError('Kullanıcı adı en az 2 karakter olmalıdır.');
       return;
     }
     if (showPinField && pin.trim().length > 0 && pin.trim().length < 4) {
-      setError('Kasa PIN kodu en az 4 karakter olmalıdır.');
+      setError('PIN en az 4 haneli olmalıdır.');
       return;
     }
 
@@ -59,79 +59,86 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
         await onRestoreIdentity(clean, nsecInput, cleanPin, avatarDataUrl);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Kimlik oluşturulamadı.');
+      setError(err instanceof Error ? err.message : 'Giriş yapılamadı.');
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#090B0F] text-[#F1F5F9] flex flex-col lg:flex-row">
-      {/* Left Narrative Column */}
-      <div className="flex-1 flex flex-col justify-between p-6 sm:p-10 lg:p-16 border-b lg:border-b-0 lg:border-r border-white/[0.07]">
+    <div className="min-h-[100dvh] w-full bg-[#07080C] neon-grid-bg text-[#F1F5F9] flex flex-col lg:flex-row">
+      {/* Left Brand & Simple Value Column */}
+      <div className="flex-1 flex flex-col justify-between p-6 sm:p-10 lg:p-16 border-b lg:border-b-0 lg:border-r border-blue-500/20">
         <div>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600/25 to-rose-600/25 border border-blue-400/35 shadow-[0_0_20px_rgba(37,99,235,0.28)] flex items-center justify-center text-rose-400">
               <Shield className="w-5 h-5" />
             </div>
-            <span className="text-xl font-bold tracking-tight font-['Plus_Jakarta_Sans']">Kapsül</span>
+            <span className="text-2xl font-bold tracking-tight font-['Plus_Jakarta_Sans'] text-white">
+              Kapsül
+            </span>
           </div>
 
-          <div className="mt-12 lg:mt-20 max-w-xl">
+          <div className="mt-10 lg:mt-20 max-w-lg">
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white leading-[1.12] [text-wrap:balance]">
-              Sunucusuz, kayıtsız ve otomatik silinen özel mesajlaşma.
+              Kayıt yok. Sunucu yok. İz yok.
             </h1>
-            <p className="mt-5 text-base sm:text-lg text-slate-400 leading-relaxed max-w-lg">
-              Telefon numarası, e-posta veya bulut veritabanı yok. Yalnızca bir kullanıcı adı seçin; mesajlar cihazınızdan uçtan uca şifrelenmiş mühürlü zarflarla çıkar, tüm cihazlarınızla senkronize olur ve seçtiğiniz sürede tamamen yok olur.
+            <p className="mt-4 text-sm sm:text-base text-slate-300 leading-relaxed">
+              Sadece bir kullanıcı adı seç ve konuşmaya başla. Mesajların şifrelenerek gider ve seçtiğin sürede kalıcı olarak silinir.
             </p>
           </div>
         </div>
 
-        <div className="mt-10 lg:mt-16 grid grid-cols-1 sm:grid-cols-3 gap-6 pt-8 border-t border-white/[0.07] max-w-2xl">
-          <div>
-            <p className="text-sm font-semibold text-white">IP Gizliliği</p>
-            <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-              Doğrudan bağlantı kurulmaz. Açık röle ağı üzerinden konuşulur; karşı taraf IP adresinizi göremez.
-            </p>
+        {/* Simple, concise 3-item strip */}
+        <div className="mt-8 lg:mt-16 pt-6 border-t border-blue-500/20 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 max-w-xl">
+          <div className="p-3.5 rounded-xl bg-[#0B1120]/80 border border-blue-500/20">
+            <p className="text-sm font-semibold text-blue-300">IP Gizli</p>
+            <p className="mt-1 text-xs text-slate-400">Kişiler birbirinin IP adresini görmez.</p>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-white">Çoklu Cihaz Senkron</p>
-            <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-              Aynı gizli anahtarla (nsec1) iki farklı cihazdan girdiğinizde gönderdiğiniz ve aldığınız mesajlar eşzamanlı görünür.
-            </p>
+          <div className="p-3.5 rounded-xl bg-[#0B1120]/80 border border-rose-500/25">
+            <p className="text-sm font-semibold text-rose-300">Tam Şifreli</p>
+            <p className="mt-1 text-xs text-slate-400">Mesajları sadece iki taraf okuyabilir.</p>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-white">24 / 12 / 7 / 1 Saat</p>
-            <p className="mt-1 text-xs text-slate-400 leading-relaxed">
-              Varsayılan 24 saatlik sayaç dolduğunda mesajlar cihaz içi şifreli kasadan kalıcı olarak silinir.
-            </p>
+          <div className="p-3.5 rounded-xl bg-[#0B1120]/80 border border-blue-500/20">
+            <p className="text-sm font-semibold text-white">24 / 12 / 7 / 1s</p>
+            <p className="mt-1 text-xs text-slate-400">Süre dolunca otomatik yok olur.</p>
           </div>
         </div>
       </div>
 
-      {/* Right Onboarding Form Column */}
-      <div className="w-full lg:w-[500px] xl:w-[540px] flex items-center justify-center p-6 sm:p-10 lg:p-14 bg-[#0D1016]">
+      {/* Right Auth Column */}
+      <div className="w-full lg:w-[490px] xl:w-[530px] flex items-center justify-center p-5 sm:p-10 bg-[#0A0E18]/90 backdrop-blur-md relative">
+        <div className="hidden lg:block absolute inset-y-0 left-0 w-px bg-gradient-to-b from-blue-500/40 via-rose-500/50 to-blue-500/20" />
+
         <div className="w-full max-w-md">
           {pendingInviteLabel && (
-            <div className="mb-6 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs text-emerald-200 leading-relaxed">
-              Davet bağlantısı algılandı: <span className="font-semibold text-white">{pendingInviteLabel}</span> ile konuşmak için giriş yapın veya kullanıcı adı belirleyin.
+            <div className="mb-5 p-3.5 rounded-xl bg-blue-600/15 border border-blue-500/35 text-xs text-blue-200">
+              Davet bağlantısı: <span className="font-semibold text-white">{pendingInviteLabel}</span>
             </div>
           )}
 
-          <div className="flex items-center gap-1 p-1 bg-[#141821] border border-white/[0.07] rounded-xl mb-7">
+          {/* Dikkatli Ol Warning Box */}
+          <div className="mb-6 p-3.5 rounded-xl bg-rose-950/35 border border-rose-500/35 shadow-[0_0_24px_rgba(225,29,72,0.12)] flex items-start gap-3">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-slate-200 leading-relaxed">
+              <span className="font-semibold text-rose-300">Dikkatli Ol:</span> Çıkış yapmadan önce gizli anahtarını mutlaka kaydet, kaybedersen hesaba tekrar giremezsin. Kasa PIN&apos;i koyman önerilir.
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 p-1 bg-[#070A12] border border-blue-500/25 rounded-xl mb-6">
             <button
               type="button"
               onClick={() => {
                 setMode('create');
                 setError(null);
               }}
-              className={`flex-1 py-2.5 px-3 text-xs font-medium rounded-lg transition-colors whitespace-nowrap min-h-[40px] cursor-pointer ${
+              className={`flex-1 py-2.5 px-3 text-xs font-semibold rounded-lg transition-all whitespace-nowrap min-h-[42px] cursor-pointer ${
                 mode === 'create'
-                  ? 'bg-[#1D2330] text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-gradient-to-r from-blue-600 to-rose-600 text-white shadow-[0_0_16px_rgba(225,29,72,0.28)]'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              Yeni Hesap Oluştur
+              Yeni Hesap
             </button>
             <button
               type="button"
@@ -139,32 +146,32 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                 setMode('restore');
                 setError(null);
               }}
-              className={`flex-1 py-2.5 px-3 text-xs font-medium rounded-lg transition-colors whitespace-nowrap min-h-[40px] cursor-pointer ${
+              className={`flex-1 py-2.5 px-3 text-xs font-semibold rounded-lg transition-all whitespace-nowrap min-h-[42px] cursor-pointer ${
                 mode === 'restore'
-                  ? 'bg-[#1D2330] text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-gradient-to-r from-blue-600 to-rose-600 text-white shadow-[0_0_16px_rgba(225,29,72,0.28)]'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              Anahtarla Giriş Yap
+              Anahtarla Giriş
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Optional EXIF-stripped Avatar Picker */}
-            <div className="flex items-center gap-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Simple Profile Photo Picker */}
+            <div className="flex items-center gap-3.5 p-3 rounded-xl bg-[#070A12] border border-white/[0.08]">
               <div className="relative">
                 {avatarDataUrl ? (
                   <img
                     src={avatarDataUrl}
-                    alt="Seçilen profil fotoğrafı"
-                    className="w-14 h-14 rounded-2xl object-cover border border-emerald-500/40"
+                    alt="Profil fotoğrafı"
+                    className="w-12 h-12 rounded-xl object-cover border border-rose-500/50"
                   />
                 ) : (
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     aria-label="Profil fotoğrafı seç"
-                    className="w-14 h-14 rounded-2xl bg-[#141821] hover:bg-[#1A202C] border border-white/10 flex items-center justify-center text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer"
+                    className="w-12 h-12 rounded-xl bg-[#0F172A] hover:bg-[#162038] border border-blue-500/30 flex items-center justify-center text-blue-300 transition-colors cursor-pointer"
                   >
                     <Camera className="w-5 h-5" />
                   </button>
@@ -174,7 +181,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                     type="button"
                     onClick={() => setAvatarDataUrl(undefined)}
                     aria-label="Fotoğrafı kaldır"
-                    className="w-5 h-5 rounded-full bg-[#1D2330] border border-white/15 flex items-center justify-center text-slate-300 hover:text-white absolute -top-1.5 -right-1.5 cursor-pointer"
+                    className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center absolute -top-1.5 -right-1.5 cursor-pointer"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -184,13 +191,11 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                  className="text-xs font-semibold text-blue-300 hover:text-white transition-colors cursor-pointer"
                 >
-                  {avatarDataUrl ? 'Profil fotoğrafını değiştir' : 'Profil fotoğrafı ekle (İsteğe bağlı)'}
+                  {avatarDataUrl ? 'Fotoğrafı değiştir' : 'Profil fotoğrafı ekle (İsteğe bağlı)'}
                 </button>
-                <p className="mt-0.5 text-[11px] text-slate-500 leading-relaxed">
-                  Sunucusuzdur; cihazda 96×96 boyutuna küçültülür ve konum/EXIF verileri otomatik silinir.
-                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Sunucuya yüklenmez · Konum bilgisi silinir</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -202,7 +207,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
             </div>
 
             <div>
-              <label htmlFor="username-input" className="block text-sm font-medium text-slate-200 mb-2">
+              <label htmlFor="username-input" className="block text-xs font-semibold text-slate-300 mb-1.5">
                 Kullanıcı Adı
               </label>
               <input
@@ -214,16 +219,16 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="ör. kuzey"
-                className="w-full h-12 px-4 rounded-xl bg-[#141821] border border-white/10 text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors text-base"
+                className="w-full h-12 px-4 rounded-xl bg-[#070A12] border border-blue-500/25 text-white placeholder:text-slate-500 focus:outline-none focus:border-rose-500 transition-colors text-base"
               />
-              <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
+              <div className="mt-1.5 flex items-center justify-between text-xs text-slate-400">
                 <span>
                   {previewClean.length >= 2 ? (
                     <>
-                      Görünür etiket: <span className="font-mono text-emerald-400">{previewClean}#••••</span>
+                      Etiketin: <span className="font-mono text-rose-400">{previewClean}#••••</span>
                     </>
                   ) : (
-                    'En az 2 karakter · Gerçek ad gerekmez'
+                    'En az 2 karakter'
                   )}
                 </span>
                 <span className="font-mono tabular-nums">{previewClean.length}/24</span>
@@ -232,8 +237,8 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
 
             {mode === 'restore' && (
               <div>
-                <label htmlFor="nsec-input" className="block text-sm font-medium text-slate-200 mb-2">
-                  Gizli Anahtar (nsec1...)
+                <label htmlFor="nsec-input" className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Gizli Anahtar
                 </label>
                 <div className="relative">
                   <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-4" />
@@ -244,45 +249,37 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                     value={nsecInput}
                     onChange={(e) => setNsecInput(e.target.value)}
                     placeholder="nsec1..."
-                    className="w-full h-12 pl-10 pr-4 rounded-xl bg-[#141821] border border-white/10 text-white font-mono text-sm placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+                    className="w-full h-12 pl-10 pr-4 rounded-xl bg-[#070A12] border border-blue-500/25 text-white font-mono text-sm placeholder:text-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
                   />
                 </div>
-                <p className="mt-1.5 text-[11px] text-slate-500">
-                  Aynı nsec1 anahtarını ikinci cihazınıza girerek son 24 saatteki mesajlarınızı senkronize edebilirsiniz.
-                </p>
               </div>
             )}
 
-            <div className="pt-1">
+            <div>
               <button
                 type="button"
                 onClick={() => setShowPinField((prev) => !prev)}
-                className="inline-flex items-center gap-2 text-xs font-medium text-slate-300 hover:text-white transition-colors py-1 cursor-pointer"
+                className="inline-flex items-center gap-2 text-xs font-medium text-blue-300 hover:text-white transition-colors py-1.5 cursor-pointer"
               >
-                <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                {showPinField ? 'Kasa PIN korumasını kaldır' : 'Cihaz içi kasa PIN kilidi ekle (Önerilen)'}
+                <Lock className="w-3.5 h-3.5 text-rose-400" />
+                {showPinField ? 'PIN alanını gizle' : 'Kasa PIN kilidi ekle (Önerilen)'}
               </button>
 
               {showPinField && (
-                <div className="mt-3">
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="new-password"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    placeholder="En az 4 haneli PIN belirleyin"
-                    className="w-full h-11 px-4 rounded-xl bg-[#141821] border border-white/10 text-white font-mono text-sm placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
-                  />
-                  <p className="mt-1.5 text-xs text-slate-400">
-                    PIN eklendiğinde cihazınızdaki şifreli kasa yalnızca bu PIN ile açılır (PBKDF2 + AES-256-GCM).
-                  </p>
-                </div>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="new-password"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  placeholder="En az 4 haneli PIN"
+                  className="mt-2 w-full h-11 px-4 rounded-xl bg-[#070A12] border border-blue-500/25 text-white font-mono text-sm placeholder:text-slate-500 focus:outline-none focus:border-rose-500 transition-colors"
+                />
               )}
             </div>
 
             {error && (
-              <div role="alert" className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+              <div role="alert" className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/35 text-xs text-rose-200">
                 {error}
               </div>
             )}
@@ -290,16 +287,11 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
             <button
               type="submit"
               disabled={submitting || previewClean.length < 2}
-              className="w-full h-12 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 disabled:hover:bg-emerald-600 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              className="w-full h-12 px-5 rounded-xl bg-gradient-to-r from-blue-600 to-rose-600 hover:from-blue-500 hover:to-rose-500 disabled:opacity-45 text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-[0_0_24px_rgba(225,29,72,0.28)] transition-all cursor-pointer"
             >
-              <span>{submitting ? 'Anahtarlar üretiliyor...' : mode === 'create' ? 'Anonim Kimlik Oluştur' : 'Giriş Yap'}</span>
+              <span>{submitting ? 'Hazırlanıyor...' : mode === 'create' ? 'Başla' : 'Giriş Yap'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
-
-            <div className="pt-3 flex items-center gap-2 text-xs text-slate-500">
-              <Sparkles className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-              <span>Özel anahtarınız yalnızca bu tarayıcıda üretilir ve hiçbir sunucuya gönderilmez.</span>
-            </div>
           </form>
         </div>
       </div>

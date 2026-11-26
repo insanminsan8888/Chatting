@@ -18,14 +18,14 @@ export const BurnModal: React.FC<BurnModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="burn-modal-title"
     >
-      <div className="w-full max-w-md bg-[#11141B] border border-red-500/25 rounded-2xl p-6 shadow-2xl">
+      <div className="w-full max-w-md bg-[#0B1120] border border-rose-500/35 shadow-[0_0_32px_rgba(225,29,72,0.22)] rounded-2xl p-6">
         <div className="flex items-start justify-between gap-4">
-          <div className="w-11 h-11 rounded-xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center text-rose-400 shrink-0">
             <AlertTriangle className="w-5 h-5" />
           </div>
           <button
@@ -39,29 +39,29 @@ export const BurnModal: React.FC<BurnModalProps> = ({
         </div>
 
         <h2 id="burn-modal-title" className="mt-4 text-lg font-bold text-white">
-          {isAll ? 'Her Şeyi Kalıcı Olarak Yak' : `${peerHandle ?? 'Sohbet'} Geçmişini Yak`}
+          {isAll ? 'Her Şeyi Kalıcı Sil' : `${peerHandle ?? 'Sohbet'} Geçmişini Sil`}
         </h2>
         <p className="mt-2 text-sm text-slate-300 leading-relaxed">
           {isAll
-            ? 'Bu işlem tarayıcınızdaki tüm şifreli sohbetleri, kişileri, PIN yapılandırmasını ve gizli kimlik anahtarınızı anında yok eder. Geri dönüşü yoktur.'
-            : 'Bu sohbetteki tüm mesajlar cihazınızdan kalıcı olarak silinecek ve karşı tarafa da şifreli imha sinyali gönderilecektir.'}
+            ? 'Tüm sohbetler, kişiler ve gizli anahtarın cihazdan anında silinir. Geri alınamaz.'
+            : 'Bu sohbetteki tüm mesajlar iki taraftan da kalıcı olarak silinecek.'}
         </p>
 
         <div className="mt-6 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="h-11 px-4 rounded-xl bg-[#171B24] hover:bg-[#1E2430] border border-white/[0.08] text-sm font-medium text-slate-200 transition-colors cursor-pointer"
+            className="h-11 px-4 rounded-xl bg-[#111A2E] hover:bg-[#17233D] border border-blue-500/25 text-sm font-medium text-slate-200 transition-colors cursor-pointer"
           >
             Vazgeç
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="h-11 px-5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors cursor-pointer"
+            className="h-11 px-5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold inline-flex items-center gap-2 shadow-[0_0_18px_rgba(225,29,72,0.35)] transition-colors cursor-pointer"
           >
             <Flame className="w-4 h-4" />
-            <span>{isAll ? 'Tüm Veriyi Yok Et' : 'Sohbeti Yak'}</span>
+            <span>{isAll ? 'Her Şeyi Yak' : 'Sohbeti Yak'}</span>
           </button>
         </div>
       </div>

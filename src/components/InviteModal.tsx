@@ -11,7 +11,7 @@ interface InviteModalProps {
 
 export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
-  const [copiedType, setCopiedType] = useState<'handle' | 'link' | 'token' | 'npub' | null>(null);
+  const [copiedType, setCopiedType] = useState<'handle' | 'link' | 'token' | null>(null);
 
   const inviteUrl = createInviteUrl(identity);
   const inviteToken = createInviteToken(identity);
@@ -23,7 +23,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
       margin: 2,
       color: {
         dark: '#F1F5F9',
-        light: '#11141B',
+        light: '#0B1120',
       },
     })
       .then((url) => {
@@ -35,31 +35,31 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
     };
   }, [inviteUrl]);
 
-  const copyValue = async (type: 'handle' | 'link' | 'token' | 'npub', val: string) => {
+  const copyValue = async (type: 'handle' | 'link' | 'token', val: string) => {
     try {
       await navigator.clipboard.writeText(val);
       setCopiedType(type);
       setTimeout(() => setCopiedType(null), 1800);
     } catch {
-      // Clipboard fallback ignored
+      // Ignore
     }
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="invite-modal-title"
     >
-      <div className="w-full max-w-md bg-[#11141B] border border-white/[0.08] rounded-2xl p-6 shadow-2xl">
-        <div className="flex items-center justify-between pb-4 border-b border-white/[0.07]">
+      <div className="w-full max-w-md bg-[#0B1120] border border-blue-500/30 shadow-[0_0_32px_rgba(37,99,235,0.22)] rounded-2xl p-6">
+        <div className="flex items-center justify-between pb-4 border-b border-blue-500/20">
           <div>
             <h2 id="invite-modal-title" className="text-lg font-bold text-white">
-              Kimlik ve Davet Paylaş
+              Davet Paylaş
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Karşı taraf sizi kullanıcı adınızla arayabilir veya davet linkiyle doğrudan ekleyebilir.
+              Arkadaşın bu kod veya link ile seni doğrudan ekleyebilir.
             </p>
           </div>
           <button
@@ -73,7 +73,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
         </div>
 
         <div className="mt-5 flex flex-col items-center">
-          <div className="p-3 rounded-2xl bg-[#11141B] border border-white/[0.08]">
+          <div className="p-3 rounded-2xl bg-[#0B1120] border border-blue-500/25 shadow-[0_0_20px_rgba(37,99,235,0.16)]">
             {qrDataUrl ? (
               <img src={qrDataUrl} alt="Kapsül davet QR kodu" className="w-44 h-44 rounded-lg" />
             ) : (
@@ -83,8 +83,8 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
             )}
           </div>
           <div className="mt-3 text-center">
-            <p className="font-mono text-base font-semibold text-emerald-400">{identity.handle}</p>
-            <p className="text-xs text-slate-500 mt-0.5">IP adresi paylaşılmaz · Yalnızca açık anahtar</p>
+            <p className="font-mono text-base font-semibold text-rose-400">{identity.handle}</p>
+            <p className="text-xs text-slate-500 mt-0.5">IP adresi paylaşılmaz</p>
           </div>
         </div>
 
@@ -92,28 +92,28 @@ export const InviteModal: React.FC<InviteModalProps> = ({ identity, onClose }) =
           <button
             type="button"
             onClick={() => copyValue('link', inviteUrl)}
-            className="w-full h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            className="w-full h-11 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-rose-600 hover:from-blue-500 hover:to-rose-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(225,29,72,0.28)] transition-all cursor-pointer"
           >
             {copiedType === 'link' ? <Check className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
-            <span>{copiedType === 'link' ? 'Davet Bağlantısı Kopyalandı' : 'Tek Tıkla Davet Linkini Kopyala'}</span>
+            <span>{copiedType === 'link' ? 'Davet Linki Kopyalandı' : 'Davet Linkini Kopyala'}</span>
           </button>
 
           <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => copyValue('handle', identity.handle)}
-              className="h-10 px-3 rounded-xl bg-[#171B24] hover:bg-[#1E2430] border border-white/[0.07] text-xs font-medium text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              className="h-10 px-3 rounded-xl bg-[#070A12] hover:bg-[#111A2E] border border-blue-500/25 text-xs font-medium text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
-              {copiedType === 'handle' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+              {copiedType === 'handle' ? <Check className="w-3.5 h-3.5 text-blue-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
               <span>{copiedType === 'handle' ? 'Kopyalandı' : 'Kullanıcı Adı'}</span>
             </button>
 
             <button
               type="button"
               onClick={() => copyValue('token', inviteToken)}
-              className="h-10 px-3 rounded-xl bg-[#171B24] hover:bg-[#1E2430] border border-white/[0.07] text-xs font-medium text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              className="h-10 px-3 rounded-xl bg-[#070A12] hover:bg-[#111A2E] border border-blue-500/25 text-xs font-medium text-slate-200 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
-              {copiedType === 'token' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+              {copiedType === 'token' ? <Check className="w-3.5 h-3.5 text-blue-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
               <span>{copiedType === 'token' ? 'Kopyalandı' : 'Kapsül Kodu'}</span>
             </button>
           </div>

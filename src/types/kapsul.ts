@@ -38,6 +38,7 @@ export interface ChatMessage {
   createdAt: number; // ms timestamp
   expiresAt: number; // ms timestamp
   ttlHours: TTLHours;
+  burnAfterSec?: number;
   delivery?: DeliveryState;
   relayCount?: number;
   doubleEncrypted?: boolean;
@@ -58,6 +59,7 @@ export interface PrivacySettings {
   relays: string[];
   hasPin: boolean;
   autoLockMinutes: 0 | 5 | 15;
+  soundEnabled: boolean;
 }
 
 export interface RelayHealth {
@@ -83,6 +85,7 @@ export interface DecryptedEnvelopePayload {
   id: string;
   text: string;
   ttlHours: TTLHours;
+  burnAfterSec?: number;
   sentAt: number;
   expiresAt: number;
   senderHandle: string;
